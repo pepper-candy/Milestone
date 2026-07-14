@@ -9,6 +9,7 @@ import type {
   ActiveSessionState,
   Milestone,
   Profile,
+  SessionLogItem,
   Task,
   UserTask,
 } from "@/types";
@@ -23,6 +24,7 @@ type Props = {
   milestones: Milestone[];
   initialActive: ActiveSessionState | null;
   sessionExp: number;
+  sessionLogs?: SessionLogItem[];
   tasksWarning?: string;
 };
 
@@ -35,6 +37,7 @@ export function DashboardClient({
   milestones,
   initialActive,
   sessionExp,
+  sessionLogs = [],
   tasksWarning,
 }: Props) {
   const router = useRouter();
@@ -285,12 +288,6 @@ export function DashboardClient({
             : "padding-top 0.38s cubic-bezier(0.22, 1, 0.36, 1)",
         }}
       >
-        <div className="mb-3 flex items-center justify-between px-1">
-          <h2 className="text-xs font-semibold uppercase tracking-[1.68px] text-[#8a7a68]">
-            {profile.is_child ? "Your Tasks" : "Tasks to review"}
-          </h2>
-        </div>
-
         {tasksWarning ? (
           <p className="mb-3 rounded-2xl bg-[rgba(200,146,42,0.12)] px-4 py-3 text-center text-sm text-[#8a7a68]">
             {tasksWarning}
@@ -301,9 +298,8 @@ export function DashboardClient({
           tasks={tasks}
           userTasks={userTasks}
           isChild={profile.is_child}
-          limit={7}
-          flat
-          onChanged={() => void refreshTasks()}
+          sessionLogs={sessionLogs}
+          onChanged={refreshTasks}
         />
       </div>
 

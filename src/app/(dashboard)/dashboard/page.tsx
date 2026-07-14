@@ -6,7 +6,7 @@ import {
   ensureTasksForViewer,
   fetchViewerUserTasks,
 } from "@/lib/user-tasks";
-import type { ActiveSessionState, Profile } from "@/types";
+import type { ActiveSessionState, Profile, SessionLogItem } from "@/types";
 import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
@@ -35,14 +35,24 @@ export default async function DashboardPage() {
         ? [user.id]
         : [];
 
+  const sessionsQuery =
+    subjectIds.length > 0
+      ? supabase
+          .from("sessions")
+          .select("id, ended_at, exp_earned, is_tutorial")
+          .in("user_id", subjectIds)
+          .not("ended_at", "is", null)
+          .order("ended_at", { ascending: false })
+      : Promise.resolve({ data: [] as SessionLogItem[], error: null });
+
   const [
     { data: tasks, error: tasksError },
     { data: userTasks },
     { data: milestones, error: milestonesError },
     { data: openSession },
-    { data: sessions },
+    { data: endedSessions },
   ] = await Promise.all([
-    supabase.from("tasks").select("*").order("task_no"),
+    supabase.from("tasks").select("*").order("seq"),
     fetchViewerUserTasks(supabase, subjectIds),
     supabase.from("milestones").select("*").order("gem_threshold"),
     supabase
@@ -53,11 +63,7 @@ export default async function DashboardPage() {
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase
-      .from("sessions")
-      .select("exp_earned")
-      .eq("user_id", user.id)
-      .not("ended_at", "is", null),
+    sessionsQuery,
   ]);
 
   const active: ActiveSessionState | null = openSession
@@ -69,10 +75,14 @@ export default async function DashboardPage() {
       }
     : null;
 
-  const sessionExp = (sessions ?? []).reduce(
-    (sum, s) => sum + Number(s.exp_earned ?? 0),
-    0,
-  );
+  const sessionLogs: SessionLogItem[] = (endedSessions ?? []).map((s) => ({
+    id: s.id as string,
+    ended_at: toUtcIso(s.ended_at as string),
+    exp_earned: Number(s.exp_earned ?? 0),
+    is_tutorial: Boolean(s.is_tutorial),
+  }));
+
+  const sessionExp = sessionLogs.reduce((sum, s) => sum + s.exp_earned, 0);
 
   const catalogEmpty = !tasksError && (tasks?.length ?? 0) === 0;
   const tasksWarning =
@@ -91,6 +101,7 @@ export default async function DashboardPage() {
       milestones={milestones ?? []}
       initialActive={active}
       sessionExp={sessionExp}
+      sessionLogs={sessionLogs}
       tasksWarning={tasksWarning}
     />
   );

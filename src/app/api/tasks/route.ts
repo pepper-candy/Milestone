@@ -38,7 +38,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get("category");
 
-  let query = supabase.from("tasks").select("*").order("task_no");
+  let query = supabase.from("tasks").select("*").order("seq");
   if (category) query = query.eq("category", category);
 
   const { data: tasks, error } = await query;
@@ -65,7 +65,14 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json()) as {
-    action: "complete" | "approve" | "claim" | "create" | "update" | "delete";
+    action:
+      | "complete"
+      | "approve"
+      | "claim"
+      | "dismiss"
+      | "create"
+      | "update"
+      | "delete";
     task_id?: string;
     user_task_id?: string;
     child_user_id?: string;
@@ -150,6 +157,30 @@ export async function POST(request: Request) {
       .eq("id", body.user_task_id)
       .eq("user_id", user.id)
       .eq("status", "verified")
+      .select("*")
+      .single();
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ userTask: data });
+  }
+
+  if (body.action === "dismiss") {
+    if (!isChild) {
+      return NextResponse.json(
+        { error: "Only children can dismiss pending tasks" },
+        { status: 403 },
+      );
+    }
+    if (!body.user_task_id) {
+      return NextResponse.json({ error: "user_task_id required" }, { status: 400 });
+    }
+    const { data, error } = await supabase
+      .from("user_tasks")
+      .update({ status: "available", completed_at: null })
+      .eq("id", body.user_task_id)
+      .eq("user_id", user.id)
+      .eq("status", "pending")
       .select("*")
       .single();
     if (error) {

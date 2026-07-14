@@ -1,11 +1,3 @@
-export type TaskCategory =
-  | "math_s23"
-  | "math_s4"
-  | "eng_writing"
-  | "eng_vocab"
-  | "eng_speaking"
-  | "community";
-
 export type UserTaskStatus = "available" | "pending" | "verified" | "claimed";
 
 export interface Profile {
@@ -22,12 +14,24 @@ export interface Profile {
 export interface Task {
   id: string;
   task_no: string;
-  category: TaskCategory;
+  /** Display category from CSV `cat` (also used as card title). */
+  category: string;
   exp: number;
   gem: number;
   title: string | null;
   description: string | null;
   requires_proof: boolean;
+  seq: number | null;
+  prereq_1: string | null;
+  prereq_2: string | null;
+}
+
+/** Ended session shown as a compact Finished log row. */
+export interface SessionLogItem {
+  id: string;
+  ended_at: string;
+  exp_earned: number;
+  is_tutorial: boolean;
 }
 
 export interface UserTask {

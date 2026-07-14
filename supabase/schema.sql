@@ -22,14 +22,18 @@ CREATE TABLE IF NOT EXISTS tasks (
   gem INTEGER NOT NULL DEFAULT 0,
   title TEXT,
   description TEXT,
-  requires_proof BOOLEAN DEFAULT false
+  requires_proof BOOLEAN DEFAULT false,
+  -- Catalog order + unlock rules (synced from ref/task_exp.csv)
+  seq INTEGER,
+  prereq_1 TEXT,
+  prereq_2 TEXT
 );
 
 CREATE TABLE IF NOT EXISTS user_tasks (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
-  status TEXT DEFAULT 'pending',
+  status TEXT DEFAULT 'available',
   completed_at TIMESTAMP,
   proof_data JSONB,
   UNIQUE(user_id, task_id)

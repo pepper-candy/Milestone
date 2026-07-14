@@ -67,7 +67,7 @@ export async function ensureUserTasks(
   const rows = missing.map((task) => ({
     user_id: userId,
     task_id: task.id,
-    status: "pending",
+    status: "available",
   }));
 
   const { error: insertError } = await supabase

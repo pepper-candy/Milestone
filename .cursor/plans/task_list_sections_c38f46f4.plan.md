@@ -4,19 +4,19 @@ overview: Restructure the dashboard task list into collapsible Your / Locked / F
 todos:
   - id: sql-sync
     content: Generate sync_tasks_from_csv.sql + update schema.sql for seq/prereqs
-    status: pending
+    status: cancelled
   - id: types-seed
     content: Extend Task type; fix ensureUserTasks to seed available
-    status: pending
+    status: cancelled
   - id: api
     content: Order by seq; add dismiss action; pass sessions into dashboard
-    status: pending
+    status: cancelled
   - id: tasklist-ui
     content: Collapsible Your/Locked/Finished sections with sort + session log rows
-    status: pending
+    status: cancelled
   - id: taskcard
     content: Cat/des mapping, Pending+X dismiss, log variant without tick
-    status: pending
+    status: cancelled
 isProject: false
 ---
 

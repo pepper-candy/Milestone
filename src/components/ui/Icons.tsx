@@ -68,6 +68,26 @@ export function CheckIcon({ className, size = 16 }: IconProps) {
   );
 }
 
+export function CloseIcon({ className, size = 16 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      aria-hidden
+    >
+      <path
+        d="M6 6l12 12M18 6 6 18"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function LockIcon({ className, size = 20 }: IconProps) {
   return (
     <svg
@@ -203,6 +223,34 @@ export function TargetIcon({ className, size = 24 }: IconProps) {
       <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.6" />
       <circle cx="12" cy="12" r="4.5" stroke="currentColor" strokeWidth="1.6" />
       <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function SpinnerIcon({ className, size = 14 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={`animate-spin ${className ?? ""}`}
+      aria-hidden
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeOpacity="0.25"
+      />
+      <path
+        d="M21 12a9 9 0 0 0-9-9"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
