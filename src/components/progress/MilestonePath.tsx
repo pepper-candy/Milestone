@@ -1,7 +1,6 @@
 "use client";
 
 import type { Milestone } from "@/types";
-import Link from "next/link";
 
 type MilestonePathProps = {
   milestones: Milestone[];
@@ -23,15 +22,12 @@ export function MilestonePath({
 
   if (compact) {
     return (
-      <Link
-        href="/milestones"
-        className="block rounded-2xl border border-[rgba(200,146,42,0.15)] bg-[rgba(223,238,243,0.45)] px-4 py-3"
-      >
+      <div className="rounded-2xl border border-[rgba(200,146,42,0.15)] bg-[rgba(223,238,243,0.45)] px-4 py-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68]">
             Progress
           </p>
-          <p className="text-xs font-semibold text-ink">
+          <p className="text-xs font-semibold tabular-nums text-ink">
             {currentGems.toFixed(1)} / {max} gems
           </p>
         </div>
@@ -49,10 +45,14 @@ export function MilestonePath({
           <p className="mt-2 text-[11px] text-[#8a7a68]">
             Next: {next.prize_name || next.title} at {next.gem_threshold}g
           </p>
+        ) : sorted.length === 0 ? (
+          <p className="mt-2 text-[11px] text-[#8a7a68]">
+            Milestone path unavailable
+          </p>
         ) : (
           <p className="mt-2 text-[11px] text-[#8a7a68]">All milestones unlocked</p>
         )}
-      </Link>
+      </div>
     );
   }
 

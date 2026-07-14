@@ -2,8 +2,11 @@ import { DashboardClient } from "@/components/dashboard/DashboardClient";
 import { hasNickname } from "@/lib/auth";
 import { toUtcIso } from "@/lib/datetime";
 import { createClient } from "@/lib/supabase/server";
-import { ensureUserTasks } from "@/lib/user-tasks";
-import type { ActiveSessionState } from "@/types";
+import {
+  ensureTasksForViewer,
+  fetchViewerUserTasks,
+} from "@/lib/user-tasks";
+import type { ActiveSessionState, Profile } from "@/types";
 import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
@@ -13,22 +16,34 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Existing users (pre-trigger) may have an empty user_tasks set — backfill once.
-  const ensureResult = await ensureUserTasks(supabase, user.id);
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!hasNickname(profile?.nickname)) redirect("/setup");
+
+  const typedProfile = profile as Profile;
+  const ensureResult = await ensureTasksForViewer(supabase, typedProfile);
 
   const serverNow = new Date().toISOString();
+  const subjectIds =
+    ensureResult.subjectUserIds.length > 0
+      ? ensureResult.subjectUserIds
+      : typedProfile.is_child
+        ? [user.id]
+        : [];
 
   const [
-    { data: profile },
-    { data: tasks },
+    { data: tasks, error: tasksError },
     { data: userTasks },
-    { data: milestones },
+    { data: milestones, error: milestonesError },
     { data: openSession },
     { data: sessions },
   ] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
     supabase.from("tasks").select("*").order("task_no"),
-    supabase.from("user_tasks").select("*").eq("user_id", user.id),
+    fetchViewerUserTasks(supabase, subjectIds),
     supabase.from("milestones").select("*").order("gem_threshold"),
     supabase
       .from("sessions")
@@ -45,8 +60,6 @@ export default async function DashboardPage() {
       .not("ended_at", "is", null),
   ]);
 
-  if (!hasNickname(profile?.nickname)) redirect("/setup");
-
   const active: ActiveSessionState | null = openSession
     ? {
         sessionId: openSession.id,
@@ -61,15 +74,24 @@ export default async function DashboardPage() {
     0,
   );
 
+  const catalogEmpty = !tasksError && (tasks?.length ?? 0) === 0;
+  const tasksWarning =
+    ensureResult.error ||
+    tasksError?.message ||
+    milestonesError?.message ||
+    (catalogEmpty
+      ? "Task catalog is blocked or empty. Run supabase/fix_grants_rls_backfill.sql in Supabase."
+      : undefined);
+
   return (
     <DashboardClient
-      profile={profile}
+      profile={typedProfile}
       tasks={tasks ?? []}
       userTasks={userTasks ?? []}
       milestones={milestones ?? []}
       initialActive={active}
       sessionExp={sessionExp}
-      tasksWarning={ensureResult.error}
+      tasksWarning={tasksWarning}
     />
   );
 }

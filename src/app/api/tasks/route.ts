@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { ensureUserTasks } from "@/lib/user-tasks";
+import {
+  ensureTasksForViewer,
+  fetchViewerUserTasks,
+} from "@/lib/user-tasks";
+import type { Profile } from "@/types";
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -11,7 +15,25 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  await ensureUserTasks(supabase, user.id);
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const typedProfile = (profile ?? {
+    id: user.id,
+    is_child: true,
+    linked_children: [],
+  }) as Profile;
+
+  const ensureResult = await ensureTasksForViewer(supabase, typedProfile);
+  const subjectIds =
+    ensureResult.subjectUserIds.length > 0
+      ? ensureResult.subjectUserIds
+      : typedProfile.is_child
+        ? [user.id]
+        : [];
 
   const { searchParams } = new URL(request.url);
   const category = searchParams.get("category");
@@ -24,21 +46,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const { data: userTasks } = await supabase
-    .from("user_tasks")
-    .select("*")
-    .eq("user_id", user.id);
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("is_child, invitation_code, linked_children")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data: userTasks } = await fetchViewerUserTasks(supabase, subjectIds);
 
   return NextResponse.json({
     tasks: tasks ?? [],
     userTasks: userTasks ?? [],
-    profile,
+    profile: typedProfile,
   });
 }
 

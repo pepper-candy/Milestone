@@ -80,7 +80,9 @@ export function TaskList({
         ))}
         {visible.length === 0 ? (
           <p className="rounded-2xl bg-warm-bg px-4 py-6 text-center text-sm text-text-muted">
-            No tasks yet.
+            {isChild
+              ? "No tasks yet."
+              : "No tasks to show. If the catalog is empty, run supabase/fix_grants_rls_backfill.sql in Supabase."}
           </p>
         ) : null}
       </div>

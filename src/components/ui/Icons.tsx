@@ -138,7 +138,11 @@ export function CameraIcon({ className, size = 32 }: IconProps) {
   );
 }
 
-export function MapPinIcon({ className, size = 32 }: IconProps) {
+export function MapPinIcon({
+  className,
+  size = 32,
+  filled = false,
+}: IconProps & { filled?: boolean }) {
   return (
     <svg
       width={size}
@@ -150,10 +154,18 @@ export function MapPinIcon({ className, size = 32 }: IconProps) {
     >
       <path
         d="M12 21s7-5.4 7-11a7 7 0 1 0-14 0c0 5.6 7 11 7 11Z"
+        fill={filled ? "#fffaf2" : "none"}
         stroke="currentColor"
         strokeWidth="1.6"
       />
-      <circle cx="12" cy="10" r="2.4" stroke="currentColor" strokeWidth="1.6" />
+      <circle
+        cx="12"
+        cy="10"
+        r="2.4"
+        fill={filled ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
     </svg>
   );
 }

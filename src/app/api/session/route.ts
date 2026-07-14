@@ -138,9 +138,9 @@ export async function POST(request: Request) {
     // ----------------------------------------------------------
     if (body.action === "start") {
       if (!isTutorial) {
-        if (!body.photo_url || body.latitude == null || body.longitude == null) {
+        if (body.latitude == null || body.longitude == null) {
           return NextResponse.json(
-            { error: "Desk photo and GPS are required to start" },
+            { error: "GPS is required to start" },
             { status: 400 },
           );
         }
@@ -235,9 +235,9 @@ export async function POST(request: Request) {
 
       const isTutorialSession = Boolean(open.is_tutorial);
       if (!isTutorialSession) {
-        if (!body.photo_url || body.latitude == null || body.longitude == null) {
+        if (body.latitude == null || body.longitude == null) {
           return NextResponse.json(
-            { error: "Desk photo and GPS are required to end" },
+            { error: "GPS is required to end" },
             { status: 400 },
           );
         }

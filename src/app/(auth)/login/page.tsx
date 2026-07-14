@@ -96,7 +96,7 @@ export default function LoginPage() {
               setCode(e.target.value.toUpperCase());
               setError(null);
             }}
-            placeholder="— — — — — —"
+            placeholder="— — — — —"
             autoComplete="off"
             className="h-[62px] w-full rounded-2xl border border-[rgba(200,146,42,0.2)] bg-surface px-6 text-center text-xl font-semibold tracking-[6px] text-ink shadow-[inset_0px_1px_4px_0px_rgba(0,0,0,0.06)] outline-none placeholder:tracking-[6px] placeholder:text-[rgba(138,122,104,0.4)] focus:border-gold/50"
           />
