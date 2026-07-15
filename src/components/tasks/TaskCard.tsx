@@ -166,8 +166,10 @@ type TaskCardProps = {
   completedAt?: string | null;
   /** Session duration for press-to-reveal subtitle (HH:MM:SS). */
   logDurationSeconds?: number | null;
-  /** Parent nickname shown after duration on press. */
+  /** Parent nickname shown after duration on press (tutorials). */
   logSignedBy?: string | null;
+  /** Working-session location check for press-to-reveal subtitle. */
+  logLocationConsistent?: boolean | null;
   onAction?: (action: TaskCardAction) => void;
   busy?: boolean;
   /** Play 5s completed ritual (wash → COMPLETED → fade out). */
@@ -194,7 +196,7 @@ function formatSessionClock(totalSeconds: number): string {
   return [h, m, sec].map((n) => String(n).padStart(2, "0")).join(":");
 }
 
-/** Compact log subtitle: swaps date ↔ duration · Signed by with 0.5s fades.
+/** Compact log subtitle: date ↔ duration · Signed by / Location status.
  * Only animates when this card is toggled — not on remount (section open / session list). */
 function LogSubtitle({
   primary,
@@ -202,7 +204,11 @@ function LogSubtitle({
   revealed,
 }: {
   primary: string;
-  alternate: { clock: string; signedBy: string | null } | null;
+  alternate: {
+    clock: string;
+    signedBy: string | null;
+    locationConsistent: boolean | null;
+  } | null;
   revealed: boolean;
 }) {
   const targetKey = revealed && alternate ? "alt" : "primary";
@@ -242,6 +248,14 @@ function LogSubtitle({
               <span aria-hidden> · </span>
               Signed by{" "}
               <span className="font-bold text-ink">{alternate.signedBy}</span>
+            </>
+          ) : alternate.locationConsistent != null ? (
+            <>
+              <span aria-hidden> · </span>
+              Location{" "}
+              <span className="font-bold text-ink">
+                {alternate.locationConsistent ? "Consistent" : "Inconsistent"}
+              </span>
             </>
           ) : null}
         </>
@@ -625,6 +639,7 @@ export function TaskCard({
   completedAt,
   logDurationSeconds,
   logSignedBy,
+  logLocationConsistent,
   onAction,
   busy = false,
   celebrate = false,
@@ -665,6 +680,10 @@ export function TaskCard({
         ? {
             clock: formatSessionClock(logDurationSeconds),
             signedBy: logSignedBy?.trim() || null,
+            locationConsistent:
+              typeof logLocationConsistent === "boolean"
+                ? logLocationConsistent
+                : null,
           }
         : null;
     const canRevealSubtitle = Boolean(dateLine && sessionReveal);

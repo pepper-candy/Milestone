@@ -40,44 +40,40 @@ export default async function DashboardPage() {
       ? supabase
           .from("sessions")
           .select(
-            "id, ended_at, exp_earned, is_tutorial, duration_seconds, conductor_nickname",
+            "id, ended_at, exp_earned, is_tutorial, duration_seconds, conductor_nickname, location_consistent",
           )
           .in("user_id", subjectIds)
           .not("ended_at", "is", null)
           .order("ended_at", { ascending: false })
       : Promise.resolve({ data: [] as SessionLogItem[], error: null });
 
+  /** Same subject as API: primary child (or child self). */
+  const sessionSubjectId = subjectIds[0] ?? null;
+
+  const openSessionQuery = sessionSubjectId
+    ? supabase
+        .from("sessions")
+        .select("*")
+        .eq("user_id", sessionSubjectId)
+        .is("ended_at", null)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : Promise.resolve({ data: null, error: null });
+
   const [
     { data: tasks, error: tasksError },
     { data: userTasks },
     { data: milestones, error: milestonesError },
-    { data: openAsOwner },
-    { data: openAsConductor },
+    { data: openSession },
     { data: endedSessions },
   ] = await Promise.all([
     supabase.from("tasks").select("*").order("seq"),
     fetchViewerUserTasks(supabase, subjectIds),
     supabase.from("milestones").select("*").order("gem_threshold"),
-    supabase
-      .from("sessions")
-      .select("*")
-      .eq("user_id", user.id)
-      .is("ended_at", null)
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from("sessions")
-      .select("*")
-      .eq("conducted_by_user_id", user.id)
-      .is("ended_at", null)
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    openSessionQuery,
     sessionsQuery,
   ]);
-
-  const openSession = openAsOwner ?? openAsConductor;
 
   const active: ActiveSessionState | null = openSession
     ? {
@@ -96,6 +92,8 @@ export default async function DashboardPage() {
     duration_seconds:
       s.duration_seconds == null ? null : Number(s.duration_seconds),
     conductor_nickname: (s.conductor_nickname as string | null) ?? null,
+    location_consistent:
+      s.location_consistent == null ? null : Boolean(s.location_consistent),
   }));
 
   const sessionExp = sessionLogs.reduce((sum, s) => sum + s.exp_earned, 0);

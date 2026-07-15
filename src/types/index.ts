@@ -34,6 +34,7 @@ export interface SessionLogItem {
   is_tutorial: boolean;
   duration_seconds: number | null;
   conductor_nickname: string | null;
+  location_consistent: boolean | null;
 }
 
 export interface UserTask {

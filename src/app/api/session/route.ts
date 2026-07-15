@@ -26,30 +26,48 @@ function toActive(
   };
 }
 
-/** Open session owned by user, or conducted by parent on a child record. */
-async function fetchOpenSession(supabase: SupabaseClient, userId: string) {
-  const { data: asOwner, error: ownerError } = await supabase
+function isUniqueViolation(error: { code?: string; message?: string }) {
+  return (
+    error.code === "23505" ||
+    /duplicate key|unique constraint/i.test(error.message ?? "")
+  );
+}
+
+/** Child credits self; parent credits primary linked child. */
+async function resolveSessionSubjectId(
+  supabase: SupabaseClient,
+  userId: string,
+  profile: {
+    is_child?: boolean | null;
+    linked_children?: string[] | null;
+  } | null,
+): Promise<string | null> {
+  const isChild = profile?.is_child ?? true;
+  if (isChild) return userId;
+  return resolvePrimaryChildId(supabase, profile?.linked_children);
+}
+
+/** Live session credited to the subject child (working or parent tutorial). */
+async function fetchOpenSessionForSubject(
+  supabase: SupabaseClient,
+  subjectChildId: string,
+) {
+  return supabase
     .from("sessions")
     .select("*")
-    .eq("user_id", userId)
+    .eq("user_id", subjectChildId)
     .is("ended_at", null)
     .order("started_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+}
 
-  if (ownerError) return { data: null, error: ownerError };
-  if (asOwner) return { data: asOwner, error: null };
-
-  const { data: asConductor, error: conductorError } = await supabase
-    .from("sessions")
-    .select("*")
-    .eq("conducted_by_user_id", userId)
-    .is("ended_at", null)
-    .order("started_at", { ascending: false })
-    .limit(1)
+async function loadViewerProfile(supabase: SupabaseClient, userId: string) {
+  return supabase
+    .from("profiles")
+    .select("is_child, nickname, linked_children")
+    .eq("id", userId)
     .maybeSingle();
-
-  return { data: asConductor, error: conductorError };
 }
 
 // ============================================================
@@ -69,9 +87,32 @@ export async function GET() {
     }
 
     const serverNow = new Date().toISOString();
-    const { data: open, error: fetchError } = await fetchOpenSession(
+    const { data: profile, error: profileError } = await loadViewerProfile(
       supabase,
       user.id,
+    );
+
+    if (profileError) {
+      console.error("❌ GET /api/session: Profile fetch error", profileError);
+      return NextResponse.json(
+        { error: "Could not fetch profile" },
+        { status: 500 },
+      );
+    }
+
+    const subjectId = await resolveSessionSubjectId(
+      supabase,
+      user.id,
+      profile,
+    );
+
+    if (!subjectId) {
+      return NextResponse.json({ active: null, serverNow });
+    }
+
+    const { data: open, error: fetchError } = await fetchOpenSessionForSubject(
+      supabase,
+      subjectId,
     );
 
     if (fetchError) {
@@ -135,11 +176,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("is_child, nickname, linked_children")
-      .eq("id", user.id)
-      .maybeSingle();
+    const { data: profile, error: profileError } = await loadViewerProfile(
+      supabase,
+      user.id,
+    );
 
     if (profileError) {
       console.error("❌ POST /api/session: Profile fetch error", profileError);
@@ -153,8 +193,14 @@ export async function POST(request: Request) {
     const isTutorial = Boolean(body.is_tutorial) && !isChild;
     const nickname = (profile?.nickname as string | null) ?? null;
 
+    const subjectId = await resolveSessionSubjectId(
+      supabase,
+      user.id,
+      profile,
+    );
+
     console.log(
-      `👤 User ${user.id}, isChild: ${isChild}, isTutorial: ${isTutorial}`,
+      `👤 User ${user.id}, isChild: ${isChild}, isTutorial: ${isTutorial}, subject: ${subjectId}`,
     );
 
     // ----------------------------------------------------------
@@ -170,10 +216,15 @@ export async function POST(request: Request) {
         }
       }
 
-      const { data: existing, error: existingError } = await fetchOpenSession(
-        supabase,
-        user.id,
-      );
+      if (!subjectId) {
+        return NextResponse.json(
+          { error: "Link a child before starting a tutorial session" },
+          { status: 400 },
+        );
+      }
+
+      const { data: existing, error: existingError } =
+        await fetchOpenSessionForSubject(supabase, subjectId);
 
       if (existingError) {
         console.error(
@@ -199,17 +250,7 @@ export async function POST(request: Request) {
       let conductorNickname: string | null = null;
 
       if (isTutorial) {
-        const childId = await resolvePrimaryChildId(
-          supabase,
-          profile?.linked_children,
-        );
-        if (!childId) {
-          return NextResponse.json(
-            { error: "Link a child before starting a tutorial session" },
-            { status: 400 },
-          );
-        }
-        ownerUserId = childId;
+        ownerUserId = subjectId;
         conductedBy = user.id;
         conductorNickname = nickname;
       }
@@ -235,6 +276,12 @@ export async function POST(request: Request) {
 
       if (insertError) {
         console.error("❌ POST /api/session: Insert error", insertError);
+        if (isUniqueViolation(insertError)) {
+          return NextResponse.json(
+            { error: "A session is already running" },
+            { status: 409 },
+          );
+        }
         return NextResponse.json(
           { error: insertError.message },
           { status: 500 },
@@ -248,12 +295,19 @@ export async function POST(request: Request) {
     }
 
     // ----------------------------------------------------------
-    // End
+    // End — child or linked parent may end the subject's open session
     // ----------------------------------------------------------
     if (body.action === "end") {
-      const { data: open, error: openError } = await fetchOpenSession(
+      if (!subjectId) {
+        return NextResponse.json(
+          { error: "No active session" },
+          { status: 404 },
+        );
+      }
+
+      const { data: open, error: openError } = await fetchOpenSessionForSubject(
         supabase,
-        user.id,
+        subjectId,
       );
 
       if (openError) {

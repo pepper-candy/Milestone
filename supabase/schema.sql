@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   location_consistent BOOLEAN
 );
 
+-- At most one live session per credit owner (child). Also in migrate_one_open_session.sql.
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_one_open_per_user
+  ON sessions (user_id)
+  WHERE ended_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS milestones (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   gem_threshold INTEGER UNIQUE NOT NULL,

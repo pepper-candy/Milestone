@@ -578,6 +578,7 @@ export function TaskList({
                   completedAt={entry.session.ended_at}
                   logDurationSeconds={entry.session.duration_seconds}
                   logSignedBy={entry.session.conductor_nickname}
+                  logLocationConsistent={entry.session.location_consistent}
                 />
               </div>
             );

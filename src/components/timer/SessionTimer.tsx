@@ -378,6 +378,24 @@ export function SessionTimer({
     ? "none"
     : "height 0.4s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease";
 
+  /** Tap handle / sheet chrome: expand, close check, or collapse (not swipe / env controls). */
+  function onChromeActivate() {
+    if (didDrag.current) {
+      didDrag.current = false;
+      return;
+    }
+    if (sheetCollapsed) {
+      setSheetCollapsed(false);
+      return;
+    }
+    if (checkOpen) {
+      closeCheck();
+      return;
+    }
+    if (active) setSheetCollapsed(true);
+    else if (!tutorial) openCheck("start-check");
+  }
+
   function renderHandle() {
     return (
       <div
@@ -397,29 +415,14 @@ export function SessionTimer({
                   : "Drag up or tap to open environment check"
         }
         className="mb-2 flex cursor-grab touch-none justify-center active:cursor-grabbing"
-        onClick={() => {
-          if (didDrag.current) {
-            didDrag.current = false;
-            return;
-          }
-          if (sheetCollapsed) {
-            setSheetCollapsed(false);
-            return;
-          }
-          if (checkOpen) {
-            closeCheck();
-            return;
-          }
-          if (active) setSheetCollapsed(true);
-          else if (!tutorial) openCheck("start-check");
+        onClick={(e) => {
+          e.stopPropagation();
+          onChromeActivate();
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            if (sheetCollapsed) setSheetCollapsed(false);
-            else if (checkOpen) closeCheck();
-            else if (active) setSheetCollapsed(true);
-            else if (!tutorial) openCheck("start-check");
+            onChromeActivate();
           }
         }}
         onPointerDown={(e) => {
@@ -444,6 +447,7 @@ export function SessionTimer({
           opacity: checkOpacity,
           transition: sheetTransition,
         }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div ref={checkInnerRef} className="pb-3">
           <EnvironmentCheckPanel
@@ -562,20 +566,24 @@ export function SessionTimer({
 
   // -------- Active session (one sheet, collapses smoothly) --------
   return (
-    <div className={sheetShellClass}>
+    <div
+      className={sheetShellClass}
+      onClick={onChromeActivate}
+      role="presentation"
+    >
       {renderHandle()}
 
       {/* Always-present header — Session running stays put; small clock fades when expanded */}
       <button
         type="button"
-        className={`mb-1 flex w-full items-center justify-between pl-1 text-left ${
-          sheetCollapsed ? "cursor-pointer" : "cursor-default"
-        }`}
-        onClick={() => {
-          if (sheetCollapsed) setSheetCollapsed(false);
+        className="mb-1 flex w-full cursor-pointer items-center justify-between pl-1 text-left"
+        onClick={(e) => {
+          e.stopPropagation();
+          onChromeActivate();
         }}
-        aria-label={sheetCollapsed ? "Expand session" : undefined}
-        tabIndex={sheetCollapsed ? 0 : -1}
+        aria-label={
+          sheetCollapsed ? "Expand session" : "Collapse session"
+        }
       >
         <div className="flex min-w-0 items-center gap-2">
           <span className="size-2 shrink-0 rounded-full bg-[#4caf50] shadow-[0_0_6px_#4caf50]" />
@@ -636,11 +644,16 @@ export function SessionTimer({
 
           {renderCheckPanel()}
 
-          <SwipeToEnter
-            key={swipeKey}
-            label="Swipe to End"
-            onComplete={onSwipeComplete}
-          />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <SwipeToEnter
+              key={swipeKey}
+              label="Swipe to End"
+              onComplete={onSwipeComplete}
+            />
+          </div>
           {error ? (
             <p className="mt-2 text-center text-sm text-red-600">{error}</p>
           ) : null}
