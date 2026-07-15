@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS user_tasks (
   status TEXT DEFAULT 'available',
   completed_at TIMESTAMP,
   proof_data JSONB,
+  marked_by_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  marked_by_nickname TEXT,
   UNIQUE(user_id, task_id)
 );
 
@@ -55,6 +57,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   end_longitude DECIMAL(11,8),
   exp_earned NUMERIC(10,1) DEFAULT 0,
   is_tutorial BOOLEAN DEFAULT false,
+  conducted_by_user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  conductor_nickname TEXT,
   -- Unused legacy columns (pause/resume removed; keep for existing DBs)
   is_paused BOOLEAN DEFAULT false,
   paused_at TIMESTAMPTZ,
@@ -168,6 +172,44 @@ CREATE POLICY "Users can insert own sessions" ON sessions
 DROP POLICY IF EXISTS "Users can update own sessions" ON sessions;
 CREATE POLICY "Users can update own sessions" ON sessions
   FOR UPDATE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Parents read linked child sessions" ON sessions;
+CREATE POLICY "Parents read linked child sessions" ON sessions
+  FOR SELECT TO authenticated USING (
+    EXISTS (
+      SELECT 1
+      FROM profiles parent
+      JOIN profiles child ON child.id = sessions.user_id
+      WHERE parent.id = auth.uid()
+        AND parent.is_child = false
+        AND child.invitation_code = ANY (parent.linked_children)
+    )
+  );
+DROP POLICY IF EXISTS "Parents insert linked child sessions" ON sessions;
+CREATE POLICY "Parents insert linked child sessions" ON sessions
+  FOR INSERT TO authenticated WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM profiles parent
+      JOIN profiles child ON child.id = sessions.user_id
+      WHERE parent.id = auth.uid()
+        AND parent.is_child = false
+        AND child.invitation_code = ANY (parent.linked_children)
+    )
+  );
+DROP POLICY IF EXISTS "Parents update linked child sessions" ON sessions;
+CREATE POLICY "Parents update linked child sessions" ON sessions
+  FOR UPDATE TO authenticated USING (
+    auth.uid() = conducted_by_user_id
+    OR EXISTS (
+      SELECT 1
+      FROM profiles parent
+      JOIN profiles child ON child.id = sessions.user_id
+      WHERE parent.id = auth.uid()
+        AND parent.is_child = false
+        AND child.invitation_code = ANY (parent.linked_children)
+    )
+  );
 
 -- Milestones readable
 ALTER TABLE milestones ENABLE ROW LEVEL SECURITY;

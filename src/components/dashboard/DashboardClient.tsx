@@ -15,7 +15,7 @@ import type {
 } from "@/types";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 type Props = {
   profile: Profile;
@@ -29,6 +29,11 @@ type Props = {
 };
 
 const COLLAPSE_THRESHOLD = 40;
+/** Closed header ≈ profile row + drag handle (matches collapsed parent layout). */
+const HEADER_COLLAPSED_EST = 72;
+/** Open header ≈ profile + progress + handle. */
+const HEADER_EXPANDED_EST = 170;
+const CONTENT_GAP = 12;
 
 export function DashboardClient({
   profile,
@@ -43,13 +48,16 @@ export function DashboardClient({
   const router = useRouter();
   const [active, setActive] = useState(initialActive);
   const [userTasks, setUserTasks] = useState(initialUserTasks);
-  /** false = progress open; true = progress tucked away */
-  const [progressCollapsed, setProgressCollapsed] = useState(false);
+  /** false = progress open; true = progress tucked away. Parents start collapsed. */
+  const [progressCollapsed, setProgressCollapsed] = useState(!profile.is_child);
   /** Extra height while dragging (negative = collapsing). */
   const [dragDelta, setDragDelta] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [progressNaturalHeight, setProgressNaturalHeight] = useState(96);
-  const [headerHeight, setHeaderHeight] = useState(88);
+  const [headerHeight, setHeaderHeight] = useState(
+    !profile.is_child ? HEADER_COLLAPSED_EST : HEADER_EXPANDED_EST,
+  );
+  const [headerMeasured, setHeaderMeasured] = useState(false);
 
   const dragging = useRef(false);
   const didDrag = useRef(false);
@@ -58,6 +66,7 @@ export function DashboardClient({
   const collapsedRef = useRef(progressCollapsed);
   const headerRef = useRef<HTMLElement>(null);
   const progressInnerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const claimed = userTasks.filter((ut) => ut.status === "claimed");
   const taskExp = claimed.reduce((sum, ut) => {
@@ -79,11 +88,12 @@ export function DashboardClient({
     setUserTasks(initialUserTasks);
   }, [initialUserTasks]);
 
-  // Default expanded; auto-collapse progress after 10s.
+  // Children: default expanded, auto-collapse after 10s. Parents stay collapsed.
   useEffect(() => {
+    if (!profile.is_child) return;
     const id = window.setTimeout(() => setProgressCollapsed(true), 10_000);
     return () => window.clearTimeout(id);
-  }, []);
+  }, [profile.is_child]);
 
   useEffect(() => {
     const inner = progressInnerRef.current;
@@ -96,15 +106,30 @@ export function DashboardClient({
     return () => ro.disconnect();
   }, [milestones, gems]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = headerRef.current;
     if (!el) return;
-    const measure = () => setHeaderHeight(el.getBoundingClientRect().height);
+    const measure = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height);
+      if (h > 0) {
+        setHeaderHeight(h);
+        setHeaderMeasured(true);
+      }
+    };
     measure();
+    // Second pass after paint settles (fonts / rounded shadow).
+    const raf = window.requestAnimationFrame(measure);
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      window.cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, [progressCollapsed, dragDelta, progressNaturalHeight]);
+
+  useLayoutEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,7 +217,11 @@ export function DashboardClient({
         className="fixed inset-x-0 top-0 z-40 mx-auto w-full max-w-[475px] rounded-b-[24px] bg-[rgba(255,250,242,0.97)] shadow-[0px_4px_32px_0px_rgba(200,146,42,0.12)]"
       >
         {/* Always static — never translates with the swipe */}
-        <div className="flex items-center justify-between px-4 pb-2 pt-3">
+        <div
+          className={`flex items-center justify-between px-4 pt-3 ${
+            progressCollapsed ? "pb-0" : "pb-2"
+          }`}
+        >
           <div className="flex min-w-0 items-center gap-3">
             <div className="relative size-10 shrink-0 overflow-hidden rounded-full bg-surface p-0.5">
               <div className="relative size-full overflow-hidden rounded-full bg-cream">
@@ -280,12 +309,15 @@ export function DashboardClient({
       </header>
 
       <div
+        ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 pb-44"
         style={{
-          paddingTop: headerHeight + 12,
-          transition: isDragging
-            ? "none"
-            : "padding-top 0.38s cubic-bezier(0.22, 1, 0.36, 1)",
+          paddingTop: headerHeight + CONTENT_GAP,
+          // Avoid animating the first measure — that pulled content under the handle.
+          transition:
+            !headerMeasured || isDragging
+              ? "none"
+              : "padding-top 0.38s cubic-bezier(0.22, 1, 0.36, 1)",
         }}
       >
         {tasksWarning ? (

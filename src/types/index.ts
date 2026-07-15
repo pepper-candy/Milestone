@@ -41,6 +41,8 @@ export interface UserTask {
   status: UserTaskStatus;
   completed_at: string | null;
   proof_data: ProofData | null;
+  marked_by_user_id?: string | null;
+  marked_by_nickname?: string | null;
   task?: Task;
 }
 
@@ -66,6 +68,8 @@ export interface Session {
   exp_earned: number;
   is_tutorial: boolean;
   location_consistent: boolean | null;
+  conducted_by_user_id?: string | null;
+  conductor_nickname?: string | null;
 }
 
 export interface Milestone {

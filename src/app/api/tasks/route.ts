@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   ensureTasksForViewer,
   fetchViewerUserTasks,
+  resolveLinkedChildIds,
 } from "@/lib/user-tasks";
 import type { Profile } from "@/types";
 
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
       | "approve"
       | "claim"
       | "dismiss"
+      | "undo"
       | "create"
       | "update"
       | "delete";
@@ -95,6 +97,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   const isChild = profile?.is_child ?? true;
+  const nickname = (profile?.nickname as string | null) ?? null;
 
   if (body.action === "complete") {
     if (!isChild) {
@@ -135,9 +138,41 @@ export async function POST(request: Request) {
     if (!body.user_task_id) {
       return NextResponse.json({ error: "user_task_id required" }, { status: 400 });
     }
+
+    const linkedChildIds = await resolveLinkedChildIds(
+      supabase,
+      profile?.linked_children,
+    );
+
+    const { data: existing, error: existingError } = await supabase
+      .from("user_tasks")
+      .select("id, user_id, status")
+      .eq("id", body.user_task_id)
+      .maybeSingle();
+
+    if (existingError || !existing) {
+      return NextResponse.json(
+        { error: existingError?.message || "Task not found" },
+        { status: existingError ? 500 : 404 },
+      );
+    }
+
+    if (!linkedChildIds.includes(existing.user_id as string)) {
+      return NextResponse.json(
+        { error: "Task does not belong to a linked child" },
+        { status: 403 },
+      );
+    }
+
+    // PASS finishes the child's task immediately (no separate claim step).
     const { data, error } = await supabase
       .from("user_tasks")
-      .update({ status: "verified" })
+      .update({
+        status: "claimed",
+        completed_at: new Date().toISOString(),
+        marked_by_user_id: user.id,
+        marked_by_nickname: nickname,
+      })
       .eq("id", body.user_task_id)
       .select("*")
       .single();
@@ -181,6 +216,66 @@ export async function POST(request: Request) {
       .eq("id", body.user_task_id)
       .eq("user_id", user.id)
       .eq("status", "pending")
+      .select("*")
+      .single();
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ userTask: data });
+  }
+
+  if (body.action === "undo") {
+    if (isChild) {
+      return NextResponse.json(
+        { error: "Only parents can undo finished tasks" },
+        { status: 403 },
+      );
+    }
+    if (!body.user_task_id) {
+      return NextResponse.json({ error: "user_task_id required" }, { status: 400 });
+    }
+
+    const linkedChildIds = await resolveLinkedChildIds(
+      supabase,
+      profile?.linked_children,
+    );
+
+    const { data: existing, error: existingError } = await supabase
+      .from("user_tasks")
+      .select("id, user_id, status")
+      .eq("id", body.user_task_id)
+      .maybeSingle();
+
+    if (existingError || !existing) {
+      return NextResponse.json(
+        { error: existingError?.message || "Task not found" },
+        { status: existingError ? 500 : 404 },
+      );
+    }
+
+    if (!linkedChildIds.includes(existing.user_id as string)) {
+      return NextResponse.json(
+        { error: "Task does not belong to a linked child" },
+        { status: 403 },
+      );
+    }
+
+    if (existing.status !== "claimed" && existing.status !== "verified") {
+      return NextResponse.json(
+        { error: "Only finished tasks can be undone" },
+        { status: 400 },
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("user_tasks")
+      .update({
+        status: "available",
+        completed_at: null,
+        marked_by_user_id: null,
+        marked_by_nickname: null,
+      })
+      .eq("id", body.user_task_id)
       .select("*")
       .single();
     if (error) {

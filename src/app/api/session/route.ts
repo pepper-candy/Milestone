@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { parseUtcMs, toUtcIso } from "@/lib/datetime";
 import {
@@ -6,6 +7,7 @@ import {
   calculateSessionExp,
   distanceMeters,
 } from "@/lib/scoring";
+import { resolvePrimaryChildId } from "@/lib/user-tasks";
 import type { ActiveSessionState } from "@/types";
 
 function toActive(
@@ -22,6 +24,32 @@ function toActive(
     serverNow,
     isTutorial: Boolean(row.is_tutorial),
   };
+}
+
+/** Open session owned by user, or conducted by parent on a child record. */
+async function fetchOpenSession(supabase: SupabaseClient, userId: string) {
+  const { data: asOwner, error: ownerError } = await supabase
+    .from("sessions")
+    .select("*")
+    .eq("user_id", userId)
+    .is("ended_at", null)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (ownerError) return { data: null, error: ownerError };
+  if (asOwner) return { data: asOwner, error: null };
+
+  const { data: asConductor, error: conductorError } = await supabase
+    .from("sessions")
+    .select("*")
+    .eq("conducted_by_user_id", userId)
+    .is("ended_at", null)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return { data: asConductor, error: conductorError };
 }
 
 // ============================================================
@@ -41,15 +69,10 @@ export async function GET() {
     }
 
     const serverNow = new Date().toISOString();
-
-    const { data: open, error: fetchError } = await supabase
-      .from("sessions")
-      .select("*")
-      .eq("user_id", user.id)
-      .is("ended_at", null)
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data: open, error: fetchError } = await fetchOpenSession(
+      supabase,
+      user.id,
+    );
 
     if (fetchError) {
       console.error("❌ GET /api/session: DB error", fetchError);
@@ -114,7 +137,7 @@ export async function POST(request: Request) {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("is_child")
+      .select("is_child, nickname, linked_children")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -128,6 +151,7 @@ export async function POST(request: Request) {
 
     const isChild = profile?.is_child ?? true;
     const isTutorial = Boolean(body.is_tutorial) && !isChild;
+    const nickname = (profile?.nickname as string | null) ?? null;
 
     console.log(
       `👤 User ${user.id}, isChild: ${isChild}, isTutorial: ${isTutorial}`,
@@ -146,12 +170,10 @@ export async function POST(request: Request) {
         }
       }
 
-      const { data: existing, error: existingError } = await supabase
-        .from("sessions")
-        .select("id")
-        .eq("user_id", user.id)
-        .is("ended_at", null)
-        .maybeSingle();
+      const { data: existing, error: existingError } = await fetchOpenSession(
+        supabase,
+        user.id,
+      );
 
       if (existingError) {
         console.error(
@@ -171,12 +193,33 @@ export async function POST(request: Request) {
         );
       }
 
+      // Parents always credit the linked child's record (tutorial ×3).
+      let ownerUserId = user.id;
+      let conductedBy: string | null = null;
+      let conductorNickname: string | null = null;
+
+      if (isTutorial) {
+        const childId = await resolvePrimaryChildId(
+          supabase,
+          profile?.linked_children,
+        );
+        if (!childId) {
+          return NextResponse.json(
+            { error: "Link a child before starting a tutorial session" },
+            { status: 400 },
+          );
+        }
+        ownerUserId = childId;
+        conductedBy = user.id;
+        conductorNickname = nickname;
+      }
+
       const startedAt = new Date().toISOString();
 
       const { data: inserted, error: insertError } = await supabase
         .from("sessions")
         .insert({
-          user_id: user.id,
+          user_id: ownerUserId,
           started_at: startedAt,
           start_photo_url: body.photo_url ?? null,
           start_latitude: body.latitude ?? null,
@@ -184,6 +227,8 @@ export async function POST(request: Request) {
           is_tutorial: isTutorial,
           is_paused: false,
           paused_ms: 0,
+          conducted_by_user_id: conductedBy,
+          conductor_nickname: conductorNickname,
         })
         .select("*")
         .single();
@@ -206,14 +251,10 @@ export async function POST(request: Request) {
     // End
     // ----------------------------------------------------------
     if (body.action === "end") {
-      const { data: open, error: openError } = await supabase
-        .from("sessions")
-        .select("*")
-        .eq("user_id", user.id)
-        .is("ended_at", null)
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: open, error: openError } = await fetchOpenSession(
+        supabase,
+        user.id,
+      );
 
       if (openError) {
         console.error(

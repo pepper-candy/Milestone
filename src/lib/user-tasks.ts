@@ -107,6 +107,15 @@ export async function resolveLinkedChildIds(
   return (data ?? []).map((row) => row.id as string);
 }
 
+/** First linked child — used when a parent credits sessions to the child record. */
+export async function resolvePrimaryChildId(
+  supabase: SupabaseClient,
+  linkedChildrenCodes: string[] | null | undefined,
+): Promise<string | null> {
+  const ids = await resolveLinkedChildIds(supabase, linkedChildrenCodes);
+  return ids[0] ?? null;
+}
+
 /**
  * Children: ensure own user_tasks.
  * Parents: do not create personal tasks — assign/backfill happens for children

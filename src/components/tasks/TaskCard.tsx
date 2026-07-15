@@ -14,12 +14,18 @@ import { detailForTask } from "@/lib/task-details";
 import type { Task, UserTask } from "@/types";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
 } from "react";
 
-export type TaskCardAction = "complete" | "approve" | "claim" | "dismiss";
+export type TaskCardAction =
+  | "complete"
+  | "approve"
+  | "claim"
+  | "dismiss"
+  | "undo";
 
 const EXIT_MS = 500;
 const EXPAND_MS = 500;
@@ -111,22 +117,27 @@ function ActionButton({
   const showDismiss = action === "dismiss";
   const label =
     action === "claim"
-      ? "Claim"
+      ? "CLAIM"
       : action === "approve"
-        ? "Approve"
-        : action === "dismiss"
-          ? "Undo"
-          : "Check";
+        ? "PASS"
+        : action === "dismiss" || action === "undo"
+          ? "UNDO"
+          : "CHECK";
   const ariaLabel =
     action === "claim"
       ? "Claim reward"
       : action === "approve"
-        ? "Approve task"
+        ? "Pass task"
         : action === "dismiss"
           ? "Dismiss pending task"
+          : action === "undo"
+            ? "Undo finished task"
           : action === "complete"
             ? "Mark complete"
             : "Task status";
+
+  const isUndo = showDismiss || action === "undo";
+  const useSwipeGradient = !isUndo;
 
   return (
     <button
@@ -138,17 +149,24 @@ function ActionButton({
       }}
       aria-busy={busy || undefined}
       aria-label={ariaLabel}
-      className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold tracking-wide transition disabled:cursor-default ${
-        showDismiss
-          ? "bg-[#8a7a68] text-[#fffaf2]"
-          : doneLook
-            ? "bg-gold text-[#fffaf2]"
-            : "bg-gold text-[#fffaf2] hover:brightness-95 active:brightness-90"
+      className={`inline-flex h-8 items-center gap-1 rounded-full pl-2.5 pr-3 text-[11px] font-semibold tracking-wide text-[#fffaf2] transition disabled:cursor-default ${
+        isUndo
+          ? "bg-[#8a7a68]"
+          : "hover:brightness-95 active:brightness-90"
       }`}
+      style={
+        useSwipeGradient
+          ? {
+              backgroundImage:
+                "linear-gradient(151deg, rgb(252, 221, 166) 0%, rgb(200, 146, 42) 100%)",
+              boxShadow: "0px 2px 8px 0px rgba(200, 146, 42, 0.35)",
+            }
+          : undefined
+      }
     >
       {busy ? (
         <SpinnerIcon size={14} className="text-[#fffaf2]" />
-      ) : showDismiss ? (
+      ) : isUndo ? (
         <CloseIcon size={12} />
       ) : (
         <CheckIcon size={14} className="text-[#fffaf2]" />
@@ -178,7 +196,9 @@ function resolveAction(
       else if (claimed) doneLook = true;
     } else if (pending) {
       action = "approve";
-    } else if (claimed || verified) {
+    } else if (claimed) {
+      action = "undo";
+    } else if (verified) {
       doneLook = true;
     }
   }
@@ -321,6 +341,10 @@ const exitStyle = (gone: boolean): CSSProperties => ({
 const ACTION_RAIL_PR = "pr-[5.75rem]";
 const REWARDS_RAIL_PR = "pr-14";
 
+const COLLAPSED_BODY_H = 18;
+/** Even height reveal so expand doesn't front-load (oversized max-height + ease-out pops). */
+const HEIGHT_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
+
 /** Pure height-reveal details; lead uses PhaseLabel for timed fades. */
 function ExpandingBody({
   paragraphs,
@@ -343,17 +367,44 @@ function ExpandingBody({
   const leadText = useExpandedCopy
     ? paragraphs[0] || compactLine
     : compactLine || paragraphs[0] || "";
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [maxH, setMaxH] = useState(COLLAPSED_BODY_H);
+
+  useLayoutEffect(() => {
+    const el = innerRef.current;
+    if (!el) return;
+
+    if (!detailsOpen) {
+      setMaxH(COLLAPSED_BODY_H);
+      return;
+    }
+
+    // Start clipped at one line, then animate to measured height so text
+    // stays semi-covered while the card pushes down over EXPAND_MS.
+    const target = el.scrollHeight;
+    setMaxH(COLLAPSED_BODY_H);
+    let raf2 = 0;
+    const raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => setMaxH(target));
+    });
+    return () => {
+      window.cancelAnimationFrame(raf1);
+      window.cancelAnimationFrame(raf2);
+    };
+  }, [detailsOpen, leadText, useExpandedCopy, paragraphs]);
 
   return (
     <div
       className="mt-0.5"
       style={{
-        maxHeight: detailsOpen ? 560 : 18,
+        maxHeight: maxH,
         overflow: "hidden",
-        transition: `max-height ${EXPAND_MS}ms ${EASE}`,
+        transition: `max-height ${EXPAND_MS}ms ${
+          detailsOpen ? HEIGHT_EASE : EASE
+        }`,
       }}
     >
-      <div className="space-y-2">
+      <div ref={innerRef} className="space-y-2">
         <PhaseLabel
           phase={phase}
           text={leadText}
@@ -412,7 +463,7 @@ export function TaskCard({
     if (!canExpand || !detail || !task) {
       return (
         <article className="flex h-[58px] overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.18)] bg-[rgba(255,250,242,0.9)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)]">
-          <div className="flex w-12 shrink-0 items-center justify-center bg-[rgba(252,221,166,0.35)]">
+          <div className="flex w-16 shrink-0 items-center justify-center bg-[rgba(252,221,166,0.35)]">
             {task ? (
               <TaskGlyph task={task} locked={false} claimed />
             ) : (
@@ -450,8 +501,8 @@ export function TaskCard({
             className="flex shrink-0 items-center justify-center overflow-hidden bg-[rgba(252,221,166,0.35)]"
             style={{
               ...exitStyle(sidesGone),
-              width: sidesGone ? 0 : 48,
-              minWidth: sidesGone ? 0 : 48,
+              width: sidesGone ? 0 : 64,
+              minWidth: sidesGone ? 0 : 64,
               height: 58,
             }}
           >

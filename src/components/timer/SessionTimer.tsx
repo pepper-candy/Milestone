@@ -35,7 +35,8 @@ export function SessionTimer({
   const [phase, setPhase] = useState<"idle" | "start-check" | "end-check">(
     "idle",
   );
-  const [tutorial, setTutorial] = useState(false);
+  /** Parents always run tutorial sessions (×3 EXP, no environment check). */
+  const tutorial = !isChild;
   const [error, setError] = useState<string | null>(null);
   const [swipeKey, setSwipeKey] = useState(0);
   /** Finished session awaiting claim swipe (shown in the bottom sheet). */
@@ -171,6 +172,17 @@ export function SessionTimer({
   async function onSwipeComplete() {
     setError(null);
     if (!active) {
+      // Parent: start tutorial session immediately (no env check).
+      if (tutorial) {
+        try {
+          await startSession({});
+          setSwipeKey((k) => k + 1);
+        } catch (e) {
+          if (e instanceof Error) setError(e.message);
+          throw e;
+        }
+        return;
+      }
       if (phase !== "start-check") {
         openCheck("start-check");
         return;
@@ -182,6 +194,17 @@ export function SessionTimer({
         if (e instanceof Error && e.message !== "location") {
           setError(e.message);
         }
+        throw e;
+      }
+      return;
+    }
+
+    // Tutorial / no evidence: end without opening env check.
+    if (!requireEvidence) {
+      try {
+        await endSession({});
+      } catch (e) {
+        if (e instanceof Error) setError(e.message);
         throw e;
       }
       return;
@@ -276,7 +299,7 @@ export function SessionTimer({
       if (offset >= DRAG_THRESHOLD) {
         setSheetCollapsed(true);
         closeCheck();
-      } else if (offset <= -DRAG_THRESHOLD) {
+      } else if (offset <= -DRAG_THRESHOLD && requireEvidence) {
         openCheck("end-check");
       }
       dragDeltaRef.current = 0;
@@ -284,7 +307,7 @@ export function SessionTimer({
       return;
     }
 
-    if (offset <= -DRAG_THRESHOLD) openCheck("start-check");
+    if (offset <= -DRAG_THRESHOLD && !tutorial) openCheck("start-check");
     dragDeltaRef.current = 0;
     setDragDelta(0);
   }
@@ -359,8 +382,12 @@ export function SessionTimer({
             : checkOpen
               ? "Drag down or tap to close environment check"
               : active
-                ? "Drag down to collapse, or up for environment check"
-                : "Drag up or tap to open environment check"
+                ? requireEvidence
+                  ? "Drag down to collapse, or up for environment check"
+                  : "Drag down or tap to collapse session"
+                : tutorial
+                  ? "Session ready — swipe to start tutorial"
+                  : "Drag up or tap to open environment check"
         }
         className="mb-2 flex cursor-grab touch-none justify-center active:cursor-grabbing"
         onClick={() => {
@@ -377,7 +404,7 @@ export function SessionTimer({
             return;
           }
           if (active) setSheetCollapsed(true);
-          else openCheck("start-check");
+          else if (!tutorial) openCheck("start-check");
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -385,7 +412,7 @@ export function SessionTimer({
             if (sheetCollapsed) setSheetCollapsed(false);
             else if (checkOpen) closeCheck();
             else if (active) setSheetCollapsed(true);
-            else openCheck("start-check");
+            else if (!tutorial) openCheck("start-check");
           }
         }}
         onPointerDown={(e) => {
@@ -426,12 +453,8 @@ export function SessionTimer({
   if (completed || claimPending) {
     const exp = completed ? Number(completed.exp_earned).toFixed(1) : "…";
     return (
-      <div className={`${sheetShellClass} relative overflow-visible`}>
+      <div className={`${sheetShellClass} overflow-visible`}>
         {completed ? <PartyPopBurst /> : null}
-
-        <div className="mb-2 flex justify-center">
-          <div className="h-1 w-8 rounded-full bg-[rgba(200,146,42,0.25)]" />
-        </div>
 
         <h2 className="mb-4 flex items-center gap-2 pl-1 text-sm font-semibold uppercase tracking-[1.68px] text-[rgba(28,22,16,0.7)]">
           <span aria-hidden className="text-base leading-none">
@@ -447,9 +470,16 @@ export function SessionTimer({
               "linear-gradient(158deg, rgba(252, 221, 166, 0.5) 0%, rgba(223, 238, 243, 0.4) 100%)",
           }}
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[1.76px] text-[#8a7a68]">
-            You earned
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[1.76px] text-[#8a7a68]">
+              You earned
+            </p>
+            {completed?.is_tutorial ? (
+              <span className="rounded-full bg-lavender/50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider">
+                ×3
+              </span>
+            ) : null}
+          </div>
           <div className="flex items-end gap-2">
             <span className="font-serif text-[48px] leading-none text-gold">
               {exp}
@@ -465,9 +495,6 @@ export function SessionTimer({
               totalSeconds={completed?.duration_seconds ?? elapsed}
             />
           </p>
-          {completed?.is_tutorial ? (
-            <p className="text-xs text-[#7b68ee]">Tutorial rate applied (×3)</p>
-          ) : null}
         </div>
 
         {completed ? (
@@ -487,38 +514,33 @@ export function SessionTimer({
   if (!active) {
     return (
       <div className={sheetShellClass}>
-        {renderHandle()}
+        {tutorial ? null : renderHandle()}
         <div className="relative mb-2 h-5">
           <p
             className="absolute inset-x-0 text-xs font-semibold uppercase tracking-[1.68px] text-[#8a7a68] transition-opacity duration-300"
-            style={{ opacity: checkOpacity > 0.5 ? 0 : 1 }}
+            style={{
+              opacity: !tutorial && checkOpacity > 0.5 ? 0 : 1,
+            }}
           >
-            Kickstart your session
+            {tutorial
+              ? "Kickstart Tutorial Session"
+              : "Kickstart your session"}
           </p>
-          <div
-            className="absolute inset-x-0 flex items-center gap-2 transition-opacity duration-300"
-            style={{ opacity: checkOpacity > 0.5 ? 1 : 0 }}
-          >
-            <p className="text-sm font-semibold uppercase tracking-[1.68px] text-[rgba(28,22,16,0.7)]">
-              Environment check
-            </p>
-            <span className="rounded-full bg-[rgba(200,146,42,0.18)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gold">
-              Beta
-            </span>
-          </div>
+          {!tutorial ? (
+            <div
+              className="absolute inset-x-0 flex items-center gap-2 transition-opacity duration-300"
+              style={{ opacity: checkOpacity > 0.5 ? 1 : 0 }}
+            >
+              <p className="text-sm font-semibold uppercase tracking-[1.68px] text-[rgba(28,22,16,0.7)]">
+                Environment check
+              </p>
+              <span className="rounded-full bg-[rgba(200,146,42,0.18)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gold">
+                Beta
+              </span>
+            </div>
+          ) : null}
         </div>
-        {renderCheckPanel()}
-        {!checkOpen && !isChild ? (
-          <label className="mb-3 flex items-center gap-2 text-xs text-ink/70">
-            <input
-              type="checkbox"
-              checked={tutorial}
-              onChange={(e) => setTutorial(e.target.checked)}
-              className="accent-gold"
-            />
-            Tutorial timer (3× EXP, no environment check)
-          </label>
-        ) : null}
+        {tutorial ? null : renderCheckPanel()}
         <SwipeToEnter
           key={swipeKey}
           label="Swipe to Start"

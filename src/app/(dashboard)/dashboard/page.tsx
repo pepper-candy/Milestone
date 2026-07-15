@@ -49,7 +49,8 @@ export default async function DashboardPage() {
     { data: tasks, error: tasksError },
     { data: userTasks },
     { data: milestones, error: milestonesError },
-    { data: openSession },
+    { data: openAsOwner },
+    { data: openAsConductor },
     { data: endedSessions },
   ] = await Promise.all([
     supabase.from("tasks").select("*").order("seq"),
@@ -63,8 +64,18 @@ export default async function DashboardPage() {
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from("sessions")
+      .select("*")
+      .eq("conducted_by_user_id", user.id)
+      .is("ended_at", null)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
     sessionsQuery,
   ]);
+
+  const openSession = openAsOwner ?? openAsConductor;
 
   const active: ActiveSessionState | null = openSession
     ? {

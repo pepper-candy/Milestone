@@ -255,6 +255,16 @@ export function TaskList({
               logGem={0}
               completedAt={entry.session.ended_at}
             />
+          ) : !isChild ? (
+            <div key={entry.task.id}>
+              <TaskCard
+                task={entry.task}
+                userTask={entry.userTask}
+                isChild={false}
+                busy={busyId === entry.task.id}
+                onAction={(action) => void handleAction(entry.task, action)}
+              />
+            </div>
           ) : (
             <TaskCard
               key={entry.task.id}
