@@ -4,6 +4,7 @@ import { MilestonePath } from "@/components/progress/MilestonePath";
 import { TaskList } from "@/components/tasks/TaskList";
 import { SessionTimer } from "@/components/timer/SessionTimer";
 import { BoltIcon, GemIcon } from "@/components/ui/Icons";
+import { subscribeFamilySync, type FamilySyncPart } from "@/lib/family-sync";
 import { totalEffectiveGems } from "@/lib/scoring";
 import type {
   ActiveSessionState,
@@ -26,6 +27,8 @@ type Props = {
   sessionExp: number;
   sessionLogs?: SessionLogItem[];
   tasksWarning?: string;
+  /** Child profile UUID(s) this dashboard watches (own id for child; linked kids for parent). */
+  subjectIds?: string[];
 };
 
 const COLLAPSE_THRESHOLD = 40;
@@ -44,10 +47,13 @@ export function DashboardClient({
   sessionExp,
   sessionLogs = [],
   tasksWarning,
+  subjectIds = [],
 }: Props) {
   const router = useRouter();
   const [active, setActive] = useState(initialActive);
   const [userTasks, setUserTasks] = useState(initialUserTasks);
+  const [logs, setLogs] = useState(sessionLogs);
+  const [liveSessionExp, setLiveSessionExp] = useState(sessionExp);
   /** false = progress open; true = progress tucked away. Parents start collapsed. */
   const [progressCollapsed, setProgressCollapsed] = useState(!profile.is_child);
   /** Extra height while dragging (negative = collapsing). */
@@ -77,7 +83,7 @@ export function DashboardClient({
     const task = tasks.find((t) => t.id === ut.task_id);
     return sum + (task?.gem ?? 0);
   }, 0);
-  const totalExp = taskExp + sessionExp;
+  const totalExp = taskExp + liveSessionExp;
   const gems = totalEffectiveGems(totalExp, taskGems);
 
   useEffect(() => {
@@ -87,6 +93,11 @@ export function DashboardClient({
   useEffect(() => {
     setUserTasks(initialUserTasks);
   }, [initialUserTasks]);
+
+  useEffect(() => {
+    setLogs(sessionLogs);
+    setLiveSessionExp(sessionExp);
+  }, [sessionLogs, sessionExp]);
 
   // Children: default expanded, auto-collapse after 10s. Parents stay collapsed.
   useEffect(() => {
@@ -159,6 +170,39 @@ export function DashboardClient({
     router.refresh();
   }
 
+  async function refreshActiveSession() {
+    try {
+      const res = await fetch("/api/session");
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        active: ActiveSessionState | null;
+      };
+      setActive(data.active);
+    } catch {
+      // ignore
+    }
+  }
+
+  /** Background refresh after a family-sync ping (other device / linked user). */
+  async function refreshFromFamilyPing(part: FamilySyncPart) {
+    if (part === "tasks" || part === "dashboard") {
+      await refreshTasks();
+    }
+    if (part === "sessions" || part === "dashboard") {
+      await refreshActiveSession();
+      // session logs / EXP come from the server page
+      router.refresh();
+    }
+  }
+
+  useEffect(() => {
+    if (subjectIds.length === 0) return;
+    return subscribeFamilySync(subjectIds, (payload) => {
+      void refreshFromFamilyPing(payload.part);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable subject set; refresh uses latest closures via router/state
+  }, [subjectIds.join("|")]);
+
   function beginDrag(clientY: number) {
     dragging.current = true;
     didDrag.current = false;
@@ -205,6 +249,8 @@ export function DashboardClient({
       : progressCollapsed
         ? 0
         : 1;
+  /** Compact only when fully tucked — keep pb while progress is dragging open. */
+  const profileCompact = openHeight < 1;
 
   const sheetTransition = isDragging
     ? "none"
@@ -219,7 +265,7 @@ export function DashboardClient({
         {/* Always static — never translates with the swipe */}
         <div
           className={`flex items-center justify-between px-4 pt-3 ${
-            progressCollapsed ? "pb-0" : "pb-2"
+            profileCompact ? "pb-0" : "pb-2"
           }`}
         >
           <div className="flex min-w-0 items-center gap-3">
@@ -330,7 +376,7 @@ export function DashboardClient({
           tasks={tasks}
           userTasks={userTasks}
           isChild={profile.is_child}
-          sessionLogs={sessionLogs}
+          sessionLogs={logs}
           onChanged={refreshTasks}
         />
       </div>
@@ -339,6 +385,7 @@ export function DashboardClient({
         isChild={profile.is_child}
         active={active}
         onActiveChange={setActive}
+        subjectIds={subjectIds}
       />
     </div>
   );

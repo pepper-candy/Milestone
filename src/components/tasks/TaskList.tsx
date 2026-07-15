@@ -2,6 +2,7 @@
 
 import { TaskCard, type TaskCardAction } from "@/components/tasks/TaskCard";
 import { ChevronDownIcon } from "@/components/ui/Icons";
+import { notifyFamilySync } from "@/lib/family-sync";
 import { enrichTasks } from "@/lib/task-catalog";
 import type { SessionLogItem, Task, UserTask } from "@/types";
 import { useMemo, useState, type ReactNode } from "react";
@@ -189,6 +190,8 @@ export function TaskList({
         return;
       }
       await onChanged?.();
+      const childId = userTask?.user_id;
+      if (childId) void notifyFamilySync(childId, "tasks");
     } finally {
       setBusyId(null);
     }

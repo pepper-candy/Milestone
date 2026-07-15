@@ -10,6 +10,7 @@ import { BoltIcon } from "@/components/ui/Icons";
 import { PartyPopBurst } from "@/components/ui/PartyPopBurst";
 import { SwipeToEnter } from "@/components/ui/SwipeToEnter";
 import { useSessionClock } from "@/hooks/useGeolocation";
+import { notifyFamilySync } from "@/lib/family-sync";
 import type { ActiveSessionState, Session } from "@/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -18,6 +19,8 @@ type SessionTimerProps = {
   isChild: boolean;
   active: ActiveSessionState | null;
   onActiveChange: (next: ActiveSessionState | null) => void;
+  /** Child subject id(s) for family-sync pings after session changes. */
+  subjectIds?: string[];
 };
 
 const DRAG_THRESHOLD = 40;
@@ -29,6 +32,7 @@ export function SessionTimer({
   isChild,
   active,
   onActiveChange,
+  subjectIds = [],
 }: SessionTimerProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -133,6 +137,7 @@ export function SessionTimer({
     setPhase("idle");
     setSheetCollapsed(false);
     envRef.current?.reset();
+    for (const id of subjectIds) void notifyFamilySync(id, "sessions");
   }
 
   async function endSession(payload: EnvironmentEvidencePayload) {
@@ -157,6 +162,7 @@ export function SessionTimer({
     setSwipeKey((k) => k + 1);
     setClaimPending(false);
     onActiveChange(null);
+    for (const id of subjectIds) void notifyFamilySync(id, "sessions");
   }
 
   function claimCompleted() {
@@ -164,6 +170,7 @@ export function SessionTimer({
     setClaimPending(false);
     setSwipeKey((k) => k + 1);
     setError(null);
+    for (const id of subjectIds) void notifyFamilySync(id, "dashboard");
     startTransition(() => {
       router.refresh();
     });

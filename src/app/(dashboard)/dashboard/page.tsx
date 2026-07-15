@@ -113,6 +113,7 @@ export default async function DashboardPage() {
       initialActive={active}
       sessionExp={sessionExp}
       sessionLogs={sessionLogs}
+      subjectIds={subjectIds}
       tasksWarning={tasksWarning}
     />
   );
