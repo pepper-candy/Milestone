@@ -30,44 +30,154 @@ type FinishedEntry =
   | { kind: "task"; sortAt: number; task: Task; userTask: UserTask }
   | { kind: "session"; sortAt: number; session: SessionLogItem };
 
+const SESSION_TOGGLE_FADE_MS = 500;
+/** Compact session log row height (h-[58px]). */
+const SESSION_CARD_H = 58;
+/** Matches space-y-3 (0.75rem) between finished cards. */
+const FINISHED_GAP_PX = 12;
+const SESSION_SLOT_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+const SECTION_ANIM_MS = 500;
+const SECTION_ANIM_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+
 function CollapsibleSection({
   title,
+  count,
   defaultOpen = true,
   children,
   empty,
+  emptyMessage = "Nothing here yet.",
+  headerEnd,
+  contentClassName = "space-y-3",
 }: {
   title: string;
+  /** Item count shown as TITLE (n). */
+  count?: number;
   defaultOpen?: boolean;
   children: ReactNode;
   empty?: boolean;
+  emptyMessage?: string;
+  /** Rendered left of the chevron (e.g. sessions toggle). */
+  headerEnd?: ReactNode;
+  contentClassName?: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [expanded, setExpanded] = useState(defaultOpen);
+  const [slotsOpen, setSlotsOpen] = useState(defaultOpen);
+  const [opaque, setOpaque] = useState(defaultOpen);
+  const [mounted, setMounted] = useState(defaultOpen);
+  const busy = useRef(false);
+  const timers = useRef<number[]>([]);
+
+  useEffect(() => {
+    return () => {
+      for (const id of timers.current) window.clearTimeout(id);
+    };
+  }, []);
+
+  function clearTimers() {
+    for (const id of timers.current) window.clearTimeout(id);
+    timers.current = [];
+  }
+
+  function after(ms: number, fn: () => void) {
+    const id = window.setTimeout(fn, ms);
+    timers.current.push(id);
+  }
+
+  function toggle() {
+    if (busy.current) return;
+    busy.current = true;
+    clearTimers();
+
+    if (expanded) {
+      // Fade out, then collapse space.
+      setExpanded(false);
+      setOpaque(false);
+      after(SECTION_ANIM_MS, () => {
+        setSlotsOpen(false);
+        after(SECTION_ANIM_MS, () => {
+          setMounted(false);
+          busy.current = false;
+        });
+      });
+      return;
+    }
+
+    // Reserve space, then fade in.
+    setExpanded(true);
+    setMounted(true);
+    setOpaque(false);
+    setSlotsOpen(false);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        setSlotsOpen(true);
+        after(SECTION_ANIM_MS, () => {
+          setOpaque(true);
+          after(SECTION_ANIM_MS, () => {
+            busy.current = false;
+          });
+        });
+      });
+    });
+  }
+
   return (
     <section>
-      <button
-        type="button"
-        className="mb-3 flex w-full items-center justify-between gap-2 px-1"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <h2 className="text-[11px] font-semibold uppercase tracking-[1.76px] text-[#8a7a68]">
-          {title}
-        </h2>
-        <ChevronDownIcon
-          size={14}
-          className={`shrink-0 text-[#8a7a68] transition-transform ${
-            open ? "rotate-180" : ""
-          }`}
-        />
-      </button>
-      {open ? (
-        empty ? (
-          <p className="rounded-2xl bg-[rgba(240,232,216,0.5)] px-4 py-5 text-center text-sm text-[#8a7a68]">
-            Nothing here yet.
-          </p>
-        ) : (
-          <div className="space-y-3">{children}</div>
-        )
+      <div className="mb-3 flex w-full items-center gap-2 px-1">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center text-left"
+          aria-expanded={expanded}
+          onClick={toggle}
+        >
+          <h2 className="text-[11px] font-semibold uppercase tracking-[1.76px] text-[#8a7a68]">
+            {title}
+            {typeof count === "number" ? ` (${count})` : null}
+          </h2>
+        </button>
+        <div className="flex shrink-0 items-center gap-3">
+          {headerEnd}
+          <button
+            type="button"
+            className="shrink-0"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+            onClick={toggle}
+          >
+            <ChevronDownIcon
+              size={14}
+              className={`text-[#8a7a68] transition-transform duration-500 ${
+                expanded ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+      {mounted ? (
+        <div
+          className="grid"
+          style={{
+            gridTemplateRows: slotsOpen ? "1fr" : "0fr",
+            transition: `grid-template-rows ${SECTION_ANIM_MS}ms ${SECTION_ANIM_EASE}`,
+          }}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <div
+              style={{
+                opacity: opaque ? 1 : 0,
+                transition: `opacity ${SECTION_ANIM_MS}ms ease`,
+              }}
+            >
+              {empty ? (
+                <p className="rounded-2xl bg-[rgba(240,232,216,0.5)] px-4 py-5 text-center text-sm text-[#8a7a68]">
+                  {emptyMessage}
+                </p>
+              ) : (
+                <div className={contentClassName}>{children}</div>
+              )}
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );
@@ -187,11 +297,76 @@ export function TaskList({
   const [enteringFinishedIds, setEnteringFinishedIds] = useState<Set<string>>(
     () => new Set(),
   );
+  /** Sessions shown in Finished by default.
+   * Hide: fade out all → collapse slots (tasks fill).
+   * Show: reopen slots → fade back in. */
+  const [showSessions, setShowSessions] = useState(true);
+  const [renderSessions, setRenderSessions] = useState(true);
+  const [sessionsOpaque, setSessionsOpaque] = useState(true);
+  const [sessionsSlotsOpen, setSessionsSlotsOpen] = useState(true);
+  const sessionToggleBusy = useRef(false);
+  const sessionToggleTimers = useRef<number[]>([]);
   const prevStatusRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    return () => {
+      for (const id of sessionToggleTimers.current) window.clearTimeout(id);
+    };
+  }, []);
+
+  function clearSessionToggleTimers() {
+    for (const id of sessionToggleTimers.current) window.clearTimeout(id);
+    sessionToggleTimers.current = [];
+  }
+
+  function afterSessionToggle(ms: number, fn: () => void) {
+    const id = window.setTimeout(fn, ms);
+    sessionToggleTimers.current.push(id);
+  }
+
+  function toggleShowSessions() {
+    if (sessionToggleBusy.current) return;
+    sessionToggleBusy.current = true;
+    clearSessionToggleTimers();
+
+    if (showSessions) {
+      setShowSessions(false);
+      setSessionsOpaque(false);
+      afterSessionToggle(SESSION_TOGGLE_FADE_MS, () => {
+        setSessionsSlotsOpen(false);
+        afterSessionToggle(SESSION_TOGGLE_FADE_MS, () => {
+          setRenderSessions(false);
+          sessionToggleBusy.current = false;
+        });
+      });
+      return;
+    }
+
+    setShowSessions(true);
+    setRenderSessions(true);
+    setSessionsOpaque(false);
+    setSessionsSlotsOpen(false);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        setSessionsSlotsOpen(true);
+        afterSessionToggle(SESSION_TOGGLE_FADE_MS, () => {
+          setSessionsOpaque(true);
+          afterSessionToggle(SESSION_TOGGLE_FADE_MS, () => {
+            sessionToggleBusy.current = false;
+          });
+        });
+      });
+    });
+  }
 
   const tasks = useMemo(() => enrichTasks(rawTasks), [rawTasks]);
   const { byTaskId, claimedNos, yourTasks, lockedTasks, finished } =
     partitionTasks(tasks, userTasks, sessionLogs, celebratingIds);
+
+  const finishedVisible = renderSessions
+    ? finished
+    : finished.filter((entry) => entry.kind === "task");
+  const hasSessionLogs = finished.some((entry) => entry.kind === "session");
 
   const startCelebration = useCallback((taskId: string) => {
     setCelebratingIds((prev) => {
@@ -286,6 +461,7 @@ export function TaskList({
     <div className="space-y-6">
       <CollapsibleSection
         title="Your Tasks"
+        count={yourTasks.length}
         empty={yourTasks.length === 0}
       >
         {yourTasks.map((task) => {
@@ -326,6 +502,8 @@ export function TaskList({
 
       <CollapsibleSection
         title="Locked Tasks"
+        count={lockedTasks.length}
+        defaultOpen={false}
         empty={lockedTasks.length === 0}
       >
         {lockedTasks.map((task) => (
@@ -343,23 +521,68 @@ export function TaskList({
 
       <CollapsibleSection
         title="Finished Tasks"
-        empty={finished.length === 0}
+        count={finished.length}
+        empty={finishedVisible.length === 0}
+        emptyMessage="Choose a task to start from!"
+        contentClassName="flex flex-col"
+        headerEnd={
+          hasSessionLogs ? (
+            <button
+              type="button"
+              className="rounded-full bg-[rgba(200,146,42,0.18)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-gold"
+              aria-pressed={showSessions}
+              onClick={toggleShowSessions}
+            >
+              {showSessions ? "Hide Sessions" : "Show Sessions"}
+            </button>
+          ) : null
+        }
       >
-        {finished.map((entry) =>
-          entry.kind === "session" ? (
-            <TaskCard
-              key={`session-${entry.session.id}`}
-              variant="log"
-              logTitle={
-                entry.session.is_tutorial
-                  ? "Tutorial Session"
-                  : "Working Session"
-              }
-              logExp={entry.session.exp_earned}
-              logGem={0}
-              completedAt={entry.session.ended_at}
-            />
-          ) : (
+        {finishedVisible.map((entry, index) => {
+          // Gap only before a later item that still occupies space (open sessions
+          // or any task) so collapse/expand includes the 12px between cards.
+          let trailingGap = 0;
+          for (let j = index + 1; j < finishedVisible.length; j++) {
+            const next = finishedVisible[j];
+            if (next.kind === "task") {
+              trailingGap = FINISHED_GAP_PX;
+              break;
+            }
+            if (sessionsSlotsOpen) {
+              trailingGap = FINISHED_GAP_PX;
+              break;
+            }
+          }
+
+          if (entry.kind === "session") {
+            return (
+              <div
+                key={`session-${entry.session.id}`}
+                className="overflow-hidden"
+                style={{
+                  maxHeight: sessionsSlotsOpen ? SESSION_CARD_H : 0,
+                  marginBottom: sessionsSlotsOpen ? trailingGap : 0,
+                  opacity: sessionsOpaque ? 1 : 0,
+                  transition: `max-height ${SESSION_TOGGLE_FADE_MS}ms ${SESSION_SLOT_EASE}, margin-bottom ${SESSION_TOGGLE_FADE_MS}ms ${SESSION_SLOT_EASE}, opacity ${SESSION_TOGGLE_FADE_MS}ms ease`,
+                }}
+              >
+                <TaskCard
+                  variant="log"
+                  logTitle={
+                    entry.session.is_tutorial
+                      ? "Tutorial Session"
+                      : "Working Session"
+                  }
+                  logExp={entry.session.exp_earned}
+                  logGem={0}
+                  completedAt={entry.session.ended_at}
+                  logDurationSeconds={entry.session.duration_seconds}
+                  logSignedBy={entry.session.conductor_nickname}
+                />
+              </div>
+            );
+          }
+          return (
             <div
               key={entry.task.id}
               className={
@@ -367,6 +590,10 @@ export function TaskList({
                   ? "opacity-0 [animation:milestone-finished-in_1s_ease_forwards]"
                   : undefined
               }
+              style={{
+                marginBottom: trailingGap,
+                transition: `margin-bottom ${SESSION_TOGGLE_FADE_MS}ms ${SESSION_SLOT_EASE}`,
+              }}
             >
               {!isChild ? (
                 <TaskCard
@@ -391,8 +618,8 @@ export function TaskList({
                 />
               )}
             </div>
-          ),
-        )}
+          );
+        })}
       </CollapsibleSection>
     </div>
   );

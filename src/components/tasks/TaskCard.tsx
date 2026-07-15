@@ -31,30 +31,37 @@ const EXIT_MS = 500;
 const EXPAND_MS = 500;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
-/** 5s completed ritual: wash 1s → COMPLETED 3s (0.5s fade-in) → fade out 1s */
+/** 5s completed ritual: wash 1s → COMPLETED → hide card chrome at 2s → hold → fade out 1s */
 export const CELEBRATE_WASH_MS = 1000;
 export const CELEBRATE_HOLD_MS = 3000;
 export const CELEBRATE_FADE_MS = 1000;
 export const CELEBRATE_TOTAL_MS =
   CELEBRATE_WASH_MS + CELEBRATE_HOLD_MS + CELEBRATE_FADE_MS;
+/** When to clear underlying card elements so only COMPLETED remains. */
+const CELEBRATE_CONTENT_HIDE_MS = 2000;
 const CELEBRATE_LABEL_FADE_MS = 500;
-const WASH_COLOR = "rgba(252, 221, 166, 0.92)";
+const WASH_COLOR = "#fdefd6";
 
 function CompletionRitual({
   active,
+  onContentHide,
   onFadeStart,
   onDone,
 }: {
   active: boolean;
+  onContentHide?: () => void;
   onFadeStart?: () => void;
   onDone?: () => void;
 }) {
   const [washOn, setWashOn] = useState(false);
   const [labelOn, setLabelOn] = useState(false);
+  const [washClear, setWashClear] = useState(false);
   const [cardFade, setCardFade] = useState(false);
   const doneRef = useRef(false);
+  const onContentHideRef = useRef(onContentHide);
   const onFadeStartRef = useRef(onFadeStart);
   const onDoneRef = useRef(onDone);
+  onContentHideRef.current = onContentHide;
   onFadeStartRef.current = onFadeStart;
   onDoneRef.current = onDone;
 
@@ -62,6 +69,7 @@ function CompletionRitual({
     if (!active) {
       setWashOn(false);
       setLabelOn(false);
+      setWashClear(false);
       setCardFade(false);
       doneRef.current = false;
       return;
@@ -73,6 +81,12 @@ function CompletionRitual({
     const tHold = window.setTimeout(() => {
       setLabelOn(true);
     }, CELEBRATE_WASH_MS);
+
+    // At 2s: drop wash + card chrome; COMPLETED stays alone on the box.
+    const tContent = window.setTimeout(() => {
+      setWashClear(true);
+      onContentHideRef.current?.();
+    }, CELEBRATE_CONTENT_HIDE_MS);
 
     const tFade = window.setTimeout(() => {
       setCardFade(true);
@@ -89,6 +103,7 @@ function CompletionRitual({
     return () => {
       window.cancelAnimationFrame(raf);
       window.clearTimeout(tHold);
+      window.clearTimeout(tContent);
       window.clearTimeout(tFade);
       window.clearTimeout(tDone);
     };
@@ -104,8 +119,8 @@ function CompletionRitual({
         style={{
           background: WASH_COLOR,
           transform: washOn ? "scaleY(1)" : "scaleY(0)",
-          transition: `transform ${CELEBRATE_WASH_MS}ms ${EASE}`,
-          opacity: cardFade ? 0 : 1,
+          transition: `transform ${CELEBRATE_WASH_MS}ms ${EASE}, opacity ${CELEBRATE_LABEL_FADE_MS}ms ease`,
+          opacity: washClear || cardFade ? 0 : 1,
         }}
       />
       <div
@@ -117,7 +132,10 @@ function CompletionRitual({
           }ms ease`,
         }}
       >
-        <p className="text-sm font-semibold uppercase tracking-[0.28em] text-gold">
+        <p
+          className="text-sm font-semibold uppercase tracking-[0.28em]"
+          style={{ color: "#c8922a" }}
+        >
           Completed
         </p>
       </div>
@@ -146,6 +164,10 @@ type TaskCardProps = {
   logExp?: number;
   logGem?: number;
   completedAt?: string | null;
+  /** Session duration for press-to-reveal subtitle (HH:MM:SS). */
+  logDurationSeconds?: number | null;
+  /** Parent nickname shown after duration on press. */
+  logSignedBy?: string | null;
   onAction?: (action: TaskCardAction) => void;
   busy?: boolean;
   /** Play 5s completed ritual (wash → COMPLETED → fade out). */
@@ -162,6 +184,72 @@ export function formatCompletedOn(iso: string | null | undefined): string | null
   const month = d.toLocaleString("en-GB", { month: "long" });
   const year = d.getFullYear();
   return `Completed on ${day} ${month}, ${year}`;
+}
+
+function formatSessionClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return [h, m, sec].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+/** Compact log subtitle: swaps date ↔ duration · Signed by with 0.5s fades.
+ * Only animates when this card is toggled — not on remount (section open / session list). */
+function LogSubtitle({
+  primary,
+  alternate,
+  revealed,
+}: {
+  primary: string;
+  alternate: { clock: string; signedBy: string | null } | null;
+  revealed: boolean;
+}) {
+  const targetKey = revealed && alternate ? "alt" : "primary";
+  const [shownKey, setShownKey] = useState(targetKey);
+  const [opacity, setOpacity] = useState(1);
+  const prevKey = useRef(targetKey);
+
+  useEffect(() => {
+    if (prevKey.current === targetKey) {
+      setShownKey(targetKey);
+      return;
+    }
+    prevKey.current = targetKey;
+    setOpacity(0);
+    const outId = window.setTimeout(() => {
+      setShownKey(targetKey);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => setOpacity(1));
+      });
+    }, EXIT_MS);
+    return () => window.clearTimeout(outId);
+  }, [targetKey]);
+
+  return (
+    <p
+      className="mt-0.5 truncate text-xs leading-[16.5px] text-[#8a7a68]"
+      style={{
+        opacity,
+        transition: `opacity ${EXIT_MS}ms ease`,
+      }}
+    >
+      {shownKey === "alt" && alternate ? (
+        <>
+          {alternate.clock}
+          {alternate.signedBy ? (
+            <>
+              <span aria-hidden> · </span>
+              Signed by{" "}
+              <span className="font-bold text-ink">{alternate.signedBy}</span>
+            </>
+          ) : null}
+        </>
+      ) : (
+        primary
+      )}
+    </p>
+  );
 }
 
 function TaskGlyph({
@@ -535,6 +623,8 @@ export function TaskCard({
   logExp,
   logGem,
   completedAt,
+  logDurationSeconds,
+  logSignedBy,
   onAction,
   busy = false,
   celebrate = false,
@@ -544,9 +634,15 @@ export function TaskCard({
   const detail = detailForTask(task);
   const canExpand = Boolean(detail) && !locked && !celebrate;
   const [celebrateFading, setCelebrateFading] = useState(false);
+  const [celebrateContentGone, setCelebrateContentGone] = useState(false);
+  const [logRevealed, setLogRevealed] = useState(false);
+  const logFlipBusy = useRef(false);
 
   useEffect(() => {
-    if (!celebrate) setCelebrateFading(false);
+    if (!celebrate) {
+      setCelebrateFading(false);
+      setCelebrateContentGone(false);
+    }
   }, [celebrate]);
 
   const {
@@ -564,29 +660,57 @@ export function TaskCard({
     const exp = logExp ?? task?.exp ?? 0;
     const gem = logGem ?? task?.gem ?? 0;
     const dateLine = formatCompletedOn(completedAt);
+    const sessionReveal =
+      typeof logDurationSeconds === "number"
+        ? {
+            clock: formatSessionClock(logDurationSeconds),
+            signedBy: logSignedBy?.trim() || null,
+          }
+        : null;
+    const canRevealSubtitle = Boolean(dateLine && sessionReveal);
 
     if (!canExpand || !detail || !task) {
       return (
-        <article className="flex h-[58px] overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.18)] bg-[rgba(255,250,242,0.9)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)]">
+        <article
+          className={`relative flex h-[58px] overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.18)] bg-[rgba(255,250,242,0.9)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)]${
+            canRevealSubtitle ? " cursor-pointer" : ""
+          }`}
+          onClick={
+            canRevealSubtitle
+              ? () => {
+                  if (logFlipBusy.current) return;
+                  logFlipBusy.current = true;
+                  setLogRevealed((v) => !v);
+                  window.setTimeout(() => {
+                    logFlipBusy.current = false;
+                  }, EXIT_MS * 2);
+                }
+              : undefined
+          }
+        >
+          <div className="absolute top-0 right-0 z-10 flex items-start py-2 pr-3">
+            <Rewards exp={exp} gem={gem} />
+          </div>
           <div className="flex w-16 shrink-0 items-center justify-center bg-[rgba(252,221,166,0.35)]">
             {task ? (
               <TaskGlyph task={task} locked={false} claimed />
             ) : (
-              <CheckIcon size={18} className="text-gold" />
+              <CheckIcon size={22} className="text-gold" />
             )}
           </div>
-          <div className="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2">
-            <div className="min-w-0">
+          <div className="min-w-0 flex-1 px-3 py-2">
+            <div className={REWARDS_RAIL_PR}>
               <p className="truncate text-sm font-semibold leading-[19px] text-ink">
                 {title}
               </p>
               {dateLine ? (
-                <p className="mt-0.5 truncate text-xs leading-[16.5px] text-[#8a7a68]">
-                  {dateLine}
-                </p>
+                <LogSubtitle
+                  primary={dateLine}
+                  alternate={sessionReveal}
+                  revealed={logRevealed}
+                />
               ) : null}
             </div>
-            <Rewards exp={exp} gem={gem} />
           </div>
         </article>
       );
@@ -608,7 +732,8 @@ export function TaskCard({
               ...exitStyle(sidesGone),
               width: sidesGone ? 0 : 64,
               minWidth: sidesGone ? 0 : 64,
-              height: 58,
+              alignSelf: "stretch",
+              minHeight: 58,
             }}
           >
             <TaskGlyph task={task} locked={false} claimed />
@@ -662,9 +787,9 @@ export function TaskCard({
       : pending && isChild
         ? "Pending Mentor Review"
         : verified && isChild
-          ? "Ready to claim"
+          ? "Claim to Complete"
           : verified && !isChild
-            ? "Passed — awaiting claim"
+            ? "Marked as Passed"
             : task.description || null;
   const showAction = !locked && Boolean(action || doneLook);
   const displayTitle = useExpandedCopy && detail
@@ -699,13 +824,14 @@ export function TaskCard({
 
   return (
     <article
-      className={`relative overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.18)] bg-[rgba(255,250,242,0.9)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
+      className={`relative overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.18)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
         canExpand ? "cursor-pointer" : ""
-      }`}
+      } ${celebrate ? "" : "bg-[rgba(255,250,242,0.9)]"}`}
       onClick={celebrate ? undefined : toggle}
       aria-expanded={detailsOpen}
       style={{
         opacity: celebrateFading ? 0 : 1,
+        background: celebrate ? WASH_COLOR : undefined,
         transition: celebrate
           ? `opacity ${CELEBRATE_FADE_MS}ms ease`
           : undefined,
@@ -714,6 +840,7 @@ export function TaskCard({
     >
       <CompletionRitual
         active={celebrate}
+        onContentHide={() => setCelebrateContentGone(true)}
         onFadeStart={() => {
           setCelebrateFading(true);
           onCelebrateFadeStart?.();
@@ -721,66 +848,76 @@ export function TaskCard({
         onDone={onCelebrateDone}
       />
 
-      {/* Fixed top-right rail; expanded body uses the space underneath */}
-      <div className="absolute top-0 right-0 z-10 flex h-[82px] flex-col items-end justify-between py-3 pr-3">
-        <Rewards exp={task.exp} gem={task.gem} />
-        {showAction ? (
-          <ActionButton
-            action={action}
-            doneLook={doneLook}
-            busy={busy}
-            onAction={onAction}
-          />
-        ) : null}
-      </div>
-
-      <div className="flex items-start overflow-hidden">
-        {/* Stage 1 (0.5s): glyph slides left; compact title/lead fade out in parallel */}
-        <div
-          className="flex shrink-0 items-center justify-center overflow-hidden bg-[rgba(252,221,166,0.35)]"
-          style={{
-            ...exitStyle(sidesGone),
-            width: sidesGone ? 0 : 64,
-            minWidth: sidesGone ? 0 : 64,
-            alignSelf: "stretch",
-            minHeight: 82,
-          }}
-        >
-          <TaskGlyph task={task} locked={false} claimed={claimed} />
+      <div
+        style={{
+          opacity: celebrateContentGone ? 0 : 1,
+          transition: celebrate
+            ? `opacity ${CELEBRATE_LABEL_FADE_MS}ms ease`
+            : undefined,
+        }}
+        aria-hidden={celebrateContentGone || undefined}
+      >
+        {/* Fixed top-right rail; expanded body uses the space underneath */}
+        <div className="absolute top-0 right-0 z-10 flex h-[82px] flex-col items-end justify-between py-3 pr-3">
+          <Rewards exp={task.exp} gem={task.gem} />
+          {showAction ? (
+            <ActionButton
+              action={action}
+              doneLook={doneLook}
+              busy={busy}
+              onAction={onAction}
+            />
+          ) : null}
         </div>
 
-        <div className="min-w-0 flex-1 p-3">
-          <div className={ACTION_RAIL_PR}>
-            <p className="text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68]">
-              {task.task_no}
-            </p>
-            <PhaseLabel
-              phase={phase}
-              text={displayTitle}
-              opacity={labelOpacity}
-              className="text-sm font-semibold leading-snug text-ink"
-            />
+        <div className="flex items-start overflow-hidden">
+          {/* Stage 1 (0.5s): glyph slides left; compact title/lead fade out in parallel */}
+          <div
+            className="flex shrink-0 items-center justify-center overflow-hidden bg-[rgba(252,221,166,0.35)]"
+            style={{
+              ...exitStyle(sidesGone),
+              width: sidesGone ? 0 : 64,
+              minWidth: sidesGone ? 0 : 64,
+              alignSelf: "stretch",
+              minHeight: 82,
+            }}
+          >
+            <TaskGlyph task={task} locked={false} claimed={claimed} />
           </div>
 
-          {detail ? (
-            <ExpandingBody
-              paragraphs={detail.paragraphs}
-              compactLine={
-                compactSubtitle || detail.paragraphs[0] || ""
-              }
-              detailsOpen={detailsOpen}
-              useExpandedCopy={useExpandedCopy}
-              labelOpacity={labelOpacity}
-              phase={phase}
-              reserveRail={ACTION_RAIL_PR}
-            />
-          ) : compactSubtitle ? (
-            <p
-              className={`mt-0.5 truncate text-xs leading-[16.5px] text-[#8a7a68] ${ACTION_RAIL_PR}`}
-            >
-              {compactSubtitle}
-            </p>
-          ) : null}
+          <div className="min-w-0 flex-1 p-3">
+            <div className={ACTION_RAIL_PR}>
+              <p className="text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68]">
+                {task.task_no}
+              </p>
+              <PhaseLabel
+                phase={phase}
+                text={displayTitle}
+                opacity={labelOpacity}
+                className="text-sm font-semibold leading-snug text-ink"
+              />
+            </div>
+
+            {detail ? (
+              <ExpandingBody
+                paragraphs={detail.paragraphs}
+                compactLine={
+                  compactSubtitle || detail.paragraphs[0] || ""
+                }
+                detailsOpen={detailsOpen}
+                useExpandedCopy={useExpandedCopy}
+                labelOpacity={labelOpacity}
+                phase={phase}
+                reserveRail={ACTION_RAIL_PR}
+              />
+            ) : compactSubtitle ? (
+              <p
+                className={`mt-0.5 truncate text-xs leading-[16.5px] text-[#8a7a68] ${ACTION_RAIL_PR}`}
+              >
+                {compactSubtitle}
+              </p>
+            ) : null}
+          </div>
         </div>
       </div>
     </article>

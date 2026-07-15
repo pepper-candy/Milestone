@@ -90,6 +90,16 @@ export function DashboardClient({
     collapsedRef.current = progressCollapsed;
   }, [progressCollapsed]);
 
+  // Prevent the browser from restoring a mid-list scroll under the fixed header.
+  useEffect(() => {
+    if (!("scrollRestoration" in history)) return;
+    const prev = history.scrollRestoration;
+    history.scrollRestoration = "manual";
+    return () => {
+      history.scrollRestoration = prev;
+    };
+  }, []);
+
   useEffect(() => {
     setUserTasks(initialUserTasks);
   }, [initialUserTasks]);
@@ -138,10 +148,35 @@ export function DashboardClient({
     };
   }, [progressCollapsed, dragDelta, progressNaturalHeight]);
 
+  // Keep YOUR TASKS under the header on reload: re-pin while padding catches up
+  // to the measured open/collapsed progress height.
+  const bootPinning = useRef(true);
   useLayoutEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = 0;
-  }, []);
-
+    if (!bootPinning.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    if (!headerMeasured) return;
+    const raf = window.requestAnimationFrame(() => {
+      if (!bootPinning.current || !scrollRef.current) return;
+      scrollRef.current.scrollTop = 0;
+      window.requestAnimationFrame(() => {
+        if (!bootPinning.current || !scrollRef.current) return;
+        scrollRef.current.scrollTop = 0;
+        bootPinning.current = false;
+      });
+    });
+    const late = window.setTimeout(() => {
+      if (bootPinning.current && scrollRef.current) {
+        scrollRef.current.scrollTop = 0;
+      }
+      bootPinning.current = false;
+    }, 320);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(late);
+    };
+  }, [headerMeasured, headerHeight]);
   useEffect(() => {
     let cancelled = false;
     async function syncSession() {

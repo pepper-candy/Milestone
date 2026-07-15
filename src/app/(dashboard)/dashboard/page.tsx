@@ -39,7 +39,9 @@ export default async function DashboardPage() {
     subjectIds.length > 0
       ? supabase
           .from("sessions")
-          .select("id, ended_at, exp_earned, is_tutorial")
+          .select(
+            "id, ended_at, exp_earned, is_tutorial, duration_seconds, conductor_nickname",
+          )
           .in("user_id", subjectIds)
           .not("ended_at", "is", null)
           .order("ended_at", { ascending: false })
@@ -91,6 +93,9 @@ export default async function DashboardPage() {
     ended_at: toUtcIso(s.ended_at as string),
     exp_earned: Number(s.exp_earned ?? 0),
     is_tutorial: Boolean(s.is_tutorial),
+    duration_seconds:
+      s.duration_seconds == null ? null : Number(s.duration_seconds),
+    conductor_nickname: (s.conductor_nickname as string | null) ?? null,
   }));
 
   const sessionExp = sessionLogs.reduce((sum, s) => sum + s.exp_earned, 0);

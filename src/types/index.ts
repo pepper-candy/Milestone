@@ -32,6 +32,8 @@ export interface SessionLogItem {
   ended_at: string;
   exp_earned: number;
   is_tutorial: boolean;
+  duration_seconds: number | null;
+  conductor_nickname: string | null;
 }
 
 export interface UserTask {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 type SwipeToEnterProps = {
   label?: string;
@@ -10,6 +10,9 @@ type SwipeToEnterProps = {
   onComplete: () => void | Promise<void>;
 };
 
+/** Gap between resting thumb and the label’s left edge. */
+const LABEL_THUMB_GAP = 12;
+
 export function SwipeToEnter({
   label = "Swipe to Enter",
   disabled = false,
@@ -18,10 +21,13 @@ export function SwipeToEnter({
   onComplete,
 }: SwipeToEnterProps) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLParagraphElement>(null);
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [done, setDone] = useState(false);
   const [entered, setEntered] = useState(false);
+  /** Static label left (px); preferred center, else cleared past the thumb. */
+  const [labelLeft, setLabelLeft] = useState<number | null>(null);
   const startX = useRef(0);
   const startOffset = useRef(0);
   const offsetRef = useRef(0);
@@ -34,6 +40,32 @@ export function SwipeToEnter({
     const id = window.requestAnimationFrame(() => setEntered(true));
     return () => window.cancelAnimationFrame(id);
   }, []);
+
+  const showSuccess = done && Boolean(successLabel);
+  const labelText = loading ? "Please wait…" : label;
+
+  // Initial label seat only — does not follow the handle while swiping.
+  useLayoutEffect(() => {
+    if (showSuccess) return;
+
+    function placeLabel() {
+      const track = trackRef.current;
+      const labelEl = labelRef.current;
+      if (!track || !labelEl) return;
+      const trackW = track.clientWidth;
+      const labelW = labelEl.scrollWidth;
+      if (trackW <= 0 || labelW <= 0) return;
+      const thumbRight = padding + handleWidth;
+      const minLeft = thumbRight + LABEL_THUMB_GAP;
+      const centeredLeft = (trackW - labelW) / 2;
+      setLabelLeft(Math.max(centeredLeft, minLeft));
+    }
+
+    placeLabel();
+    const ro = new ResizeObserver(placeLabel);
+    if (trackRef.current) ro.observe(trackRef.current);
+    return () => ro.disconnect();
+  }, [labelText, showSuccess, handleWidth, padding]);
 
   function maxOffset() {
     const width = trackRef.current?.clientWidth ?? 360;
@@ -96,7 +128,6 @@ export function SwipeToEnter({
     }
   }
 
-  const showSuccess = done && Boolean(successLabel);
   const journey = maxOffset() > 0 ? offset / maxOffset() : 0;
   // Label fades early; handle (+ icon) fades across the full travel
   const slideLabelOpacity = Math.max(0, 1 - journey / 0.25);
@@ -118,13 +149,16 @@ export function SwipeToEnter({
     >
       {!showSuccess && (
         <p
-          className="pointer-events-none absolute inset-0 flex items-center justify-center text-[14px] font-semibold uppercase tracking-[1.96px] text-[rgba(28,22,16,0.55)]"
+          ref={labelRef}
+          className="pointer-events-none absolute top-0 bottom-0 flex items-center whitespace-nowrap text-[14px] font-semibold uppercase tracking-[1.96px] text-[rgba(28,22,16,0.55)]"
           style={{
+            left: labelLeft ?? "50%",
+            transform: labelLeft == null ? "translateX(-50%)" : undefined,
             opacity: labelOpacity,
             transition: dragging ? "none" : "opacity 0.5s ease",
           }}
         >
-          {loading ? "Please wait…" : label}
+          {labelText}
         </p>
       )}
 
