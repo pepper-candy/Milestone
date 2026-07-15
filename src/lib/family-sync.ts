@@ -67,7 +67,7 @@ export async function notifyFamilySync(
       resolve();
     }, 2000);
 
-    channel.subscribe((status) => {
+    channel.subscribe((status: string) => {
       if (status !== "SUBSCRIBED") return;
       window.clearTimeout(timeout);
       void channel
