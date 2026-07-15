@@ -36,7 +36,13 @@ export async function proxy(request: NextRequest) {
     path === "/favicon.ico" ||
     path.startsWith("/_next");
 
-  if (!user && !isAuthPage && !isPublicAsset && path !== "/") {
+  if (
+    !user &&
+    !isAuthPage &&
+    !isPublicAsset &&
+    path !== "/" &&
+    !path.startsWith("/api")
+  ) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
@@ -48,5 +54,8 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|brand).*)"],
+  // Include /api so expired access tokens are refreshed before route handlers run.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|brand|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 };

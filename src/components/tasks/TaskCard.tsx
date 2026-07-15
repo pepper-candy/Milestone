@@ -31,6 +31,100 @@ const EXIT_MS = 500;
 const EXPAND_MS = 500;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
+/** 5s completed ritual: wash 1s → COMPLETED 3s (0.5s fade-in) → fade out 1s */
+export const CELEBRATE_WASH_MS = 1000;
+export const CELEBRATE_HOLD_MS = 3000;
+export const CELEBRATE_FADE_MS = 1000;
+export const CELEBRATE_TOTAL_MS =
+  CELEBRATE_WASH_MS + CELEBRATE_HOLD_MS + CELEBRATE_FADE_MS;
+const CELEBRATE_LABEL_FADE_MS = 500;
+const WASH_COLOR = "rgba(252, 221, 166, 0.92)";
+
+function CompletionRitual({
+  active,
+  onFadeStart,
+  onDone,
+}: {
+  active: boolean;
+  onFadeStart?: () => void;
+  onDone?: () => void;
+}) {
+  const [washOn, setWashOn] = useState(false);
+  const [labelOn, setLabelOn] = useState(false);
+  const [cardFade, setCardFade] = useState(false);
+  const doneRef = useRef(false);
+  const onFadeStartRef = useRef(onFadeStart);
+  const onDoneRef = useRef(onDone);
+  onFadeStartRef.current = onFadeStart;
+  onDoneRef.current = onDone;
+
+  useEffect(() => {
+    if (!active) {
+      setWashOn(false);
+      setLabelOn(false);
+      setCardFade(false);
+      doneRef.current = false;
+      return;
+    }
+
+    doneRef.current = false;
+    const raf = window.requestAnimationFrame(() => setWashOn(true));
+
+    const tHold = window.setTimeout(() => {
+      setLabelOn(true);
+    }, CELEBRATE_WASH_MS);
+
+    const tFade = window.setTimeout(() => {
+      setCardFade(true);
+      onFadeStartRef.current?.();
+    }, CELEBRATE_WASH_MS + CELEBRATE_HOLD_MS);
+
+    const tDone = window.setTimeout(() => {
+      if (!doneRef.current) {
+        doneRef.current = true;
+        onDoneRef.current?.();
+      }
+    }, CELEBRATE_TOTAL_MS);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(tHold);
+      window.clearTimeout(tFade);
+      window.clearTimeout(tDone);
+    };
+  }, [active]);
+
+  if (!active) return null;
+
+  return (
+    <>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-20 origin-top"
+        style={{
+          background: WASH_COLOR,
+          transform: washOn ? "scaleY(1)" : "scaleY(0)",
+          transition: `transform ${CELEBRATE_WASH_MS}ms ${EASE}`,
+          opacity: cardFade ? 0 : 1,
+        }}
+      />
+      <div
+        className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+        style={{
+          opacity: cardFade ? 0 : labelOn ? 1 : 0,
+          transition: `opacity ${
+            cardFade ? CELEBRATE_FADE_MS : CELEBRATE_LABEL_FADE_MS
+          }ms ease`,
+        }}
+      >
+        <p className="text-sm font-semibold uppercase tracking-[0.28em] text-gold">
+          Completed
+        </p>
+      </div>
+    </>
+  );
+}
+
 /** Timed expand / reverse collapse with synced title+lead fades. */
 type Phase =
   | "closed"
@@ -54,6 +148,10 @@ type TaskCardProps = {
   completedAt?: string | null;
   onAction?: (action: TaskCardAction) => void;
   busy?: boolean;
+  /** Play 5s completed ritual (wash → COMPLETED → fade out). */
+  celebrate?: boolean;
+  onCelebrateDone?: () => void;
+  onCelebrateFadeStart?: () => void;
 };
 
 export function formatCompletedOn(iso: string | null | undefined): string | null {
@@ -131,7 +229,7 @@ function ActionButton({
         : action === "dismiss"
           ? "Dismiss pending task"
           : action === "undo"
-            ? "Undo finished task"
+            ? "Undo passed or finished task"
           : action === "complete"
             ? "Mark complete"
             : "Task status";
@@ -196,10 +294,8 @@ function resolveAction(
       else if (claimed) doneLook = true;
     } else if (pending) {
       action = "approve";
-    } else if (claimed) {
+    } else if (verified || claimed) {
       action = "undo";
-    } else if (verified) {
-      doneLook = true;
     }
   }
   return { action, doneLook };
@@ -441,9 +537,18 @@ export function TaskCard({
   completedAt,
   onAction,
   busy = false,
+  celebrate = false,
+  onCelebrateDone,
+  onCelebrateFadeStart,
 }: TaskCardProps) {
   const detail = detailForTask(task);
-  const canExpand = Boolean(detail) && !locked;
+  const canExpand = Boolean(detail) && !locked && !celebrate;
+  const [celebrateFading, setCelebrateFading] = useState(false);
+
+  useEffect(() => {
+    if (!celebrate) setCelebrateFading(false);
+  }, [celebrate]);
+
   const {
     phase,
     sidesGone,
@@ -555,10 +660,12 @@ export function TaskCard({
     locked
       ? null
       : pending && isChild
-        ? "Pending"
+        ? "Pending Mentor Review"
         : verified && isChild
           ? "Ready to claim"
-          : task.description || null;
+          : verified && !isChild
+            ? "Passed — awaiting claim"
+            : task.description || null;
   const showAction = !locked && Boolean(action || doneLook);
   const displayTitle = useExpandedCopy && detail
     ? detail.fullTitle
@@ -595,9 +702,25 @@ export function TaskCard({
       className={`relative overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.18)] bg-[rgba(255,250,242,0.9)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
         canExpand ? "cursor-pointer" : ""
       }`}
-      onClick={toggle}
+      onClick={celebrate ? undefined : toggle}
       aria-expanded={detailsOpen}
+      style={{
+        opacity: celebrateFading ? 0 : 1,
+        transition: celebrate
+          ? `opacity ${CELEBRATE_FADE_MS}ms ease`
+          : undefined,
+        pointerEvents: celebrate ? "none" : undefined,
+      }}
     >
+      <CompletionRitual
+        active={celebrate}
+        onFadeStart={() => {
+          setCelebrateFading(true);
+          onCelebrateFadeStart?.();
+        }}
+        onDone={onCelebrateDone}
+      />
+
       {/* Fixed top-right rail; expanded body uses the space underneath */}
       <div className="absolute top-0 right-0 z-10 flex h-[82px] flex-col items-end justify-between py-3 pr-3">
         <Rewards exp={task.exp} gem={task.gem} />

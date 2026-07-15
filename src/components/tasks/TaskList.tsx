@@ -1,11 +1,22 @@
 "use client";
 
-import { TaskCard, type TaskCardAction } from "@/components/tasks/TaskCard";
+import {
+  TaskCard,
+  CELEBRATE_FADE_MS,
+  type TaskCardAction,
+} from "@/components/tasks/TaskCard";
 import { ChevronDownIcon } from "@/components/ui/Icons";
 import { notifyFamilySync } from "@/lib/family-sync";
 import { enrichTasks } from "@/lib/task-catalog";
 import type { SessionLogItem, Task, UserTask } from "@/types";
-import { useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 type TaskListProps = {
   tasks: Task[];
@@ -31,29 +42,27 @@ function CollapsibleSection({
   empty?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-
   return (
     <section>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
         className="mb-3 flex w-full items-center justify-between gap-2 px-1"
         aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
       >
-        <h3 className="text-xs font-semibold uppercase tracking-[1.68px] text-[#8a7a68]">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[1.76px] text-[#8a7a68]">
           {title}
-        </h3>
-        {/* Expanded → chevron up; collapsed → chevron down */}
+        </h2>
         <ChevronDownIcon
-          size={16}
+          size={14}
           className={`shrink-0 text-[#8a7a68] transition-transform ${
-            open ? "rotate-180" : "rotate-0"
+            open ? "rotate-180" : ""
           }`}
         />
       </button>
       {open ? (
         empty ? (
-          <p className="rounded-2xl bg-warm-bg px-4 py-6 text-center text-sm text-text-muted">
+          <p className="rounded-2xl bg-[rgba(240,232,216,0.5)] px-4 py-5 text-center text-sm text-[#8a7a68]">
             Nothing here yet.
           </p>
         ) : (
@@ -92,10 +101,7 @@ function isPrereqClaimed(
   return claimedNos.has(normalizeNo(prereq));
 }
 
-function unmetPrereqHints(
-  task: Task,
-  claimedNos: Set<string>,
-): string[] {
+function unmetPrereqHints(task: Task, claimedNos: Set<string>): string[] {
   const hints: string[] = [];
   for (const prereq of [task.prereq_1, task.prereq_2]) {
     if (!prereq || !normalizeNo(prereq)) continue;
@@ -110,6 +116,7 @@ function partitionTasks(
   tasks: Task[],
   userTasks: UserTask[],
   sessionLogs: SessionLogItem[],
+  celebratingIds: Set<string>,
 ) {
   const byTaskId = new Map(userTasks.map((ut) => [ut.task_id, ut]));
   const claimedNos = buildClaimedNos(tasks, userTasks);
@@ -124,7 +131,12 @@ function partitionTasks(
       isPrereqClaimed(task.prereq_1, claimedNos) &&
       isPrereqClaimed(task.prereq_2, claimedNos);
 
-    // Claimed always goes to Finished (even if prereqs later change).
+    // Keep celebrating claimed cards in Your Tasks until the 5s ritual ends.
+    if (ut?.status === "claimed" && celebratingIds.has(task.id)) {
+      yourTasks.push(task);
+      continue;
+    }
+
     if (ut?.status === "claimed") {
       finishedTasks.push({
         kind: "task",
@@ -135,7 +147,6 @@ function partitionTasks(
       continue;
     }
 
-    // Pending/verified/available still count as unfinished for unlock AND listing.
     if (!unlocked) {
       lockedTasks.push(task);
       continue;
@@ -167,9 +178,68 @@ export function TaskList({
   onChanged,
 }: TaskListProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [celebratingIds, setCelebratingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [collapsingIds, setCollapsingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [enteringFinishedIds, setEnteringFinishedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const prevStatusRef = useRef<Map<string, string>>(new Map());
+
   const tasks = useMemo(() => enrichTasks(rawTasks), [rawTasks]);
   const { byTaskId, claimedNos, yourTasks, lockedTasks, finished } =
-    partitionTasks(tasks, userTasks, sessionLogs);
+    partitionTasks(tasks, userTasks, sessionLogs, celebratingIds);
+
+  const startCelebration = useCallback((taskId: string) => {
+    setCelebratingIds((prev) => {
+      if (prev.has(taskId)) return prev;
+      const next = new Set(prev);
+      next.add(taskId);
+      return next;
+    });
+  }, []);
+
+  // Detect newly claimed tasks (local PASS / claim or family-sync refresh).
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    for (const ut of userTasks) {
+      const before = prev.get(ut.task_id);
+      if (ut.status === "claimed" && before && before !== "claimed") {
+        startCelebration(ut.task_id);
+      }
+    }
+    const next = new Map<string, string>();
+    for (const ut of userTasks) next.set(ut.task_id, ut.status);
+    prevStatusRef.current = next;
+  }, [userTasks, startCelebration]);
+
+  function finishCelebration(taskId: string) {
+    setCelebratingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
+    setCollapsingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
+    setEnteringFinishedIds((prev) => {
+      const next = new Set(prev);
+      next.add(taskId);
+      return next;
+    });
+    window.setTimeout(() => {
+      setEnteringFinishedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
+    }, CELEBRATE_FADE_MS);
+  }
 
   async function handleAction(task: Task, action: TaskCardAction) {
     setBusyId(task.id);
@@ -178,6 +248,7 @@ export function TaskList({
       const res = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({
           action,
           task_id: task.id,
@@ -188,6 +259,10 @@ export function TaskList({
         const data = (await res.json()) as { error?: string };
         alert(data.error || "Action failed");
         return;
+      }
+      // CLAIM moves to Finished + celebration (PASS only verifies).
+      if (action === "claim") {
+        startCelebration(task.id);
       }
       await onChanged?.();
       const childId = userTask?.user_id;
@@ -209,18 +284,44 @@ export function TaskList({
 
   return (
     <div className="space-y-6">
-      <CollapsibleSection title="Your Tasks" empty={yourTasks.length === 0}>
-        {yourTasks.map((task) => (
-          <div key={task.id}>
-            <TaskCard
-              task={task}
-              userTask={byTaskId.get(task.id)}
-              isChild={isChild}
-              busy={busyId === task.id}
-              onAction={(action) => void handleAction(task, action)}
-            />
-          </div>
-        ))}
+      <CollapsibleSection
+        title="Your Tasks"
+        empty={yourTasks.length === 0}
+      >
+        {yourTasks.map((task) => {
+          const celebrating = celebratingIds.has(task.id);
+          const collapsing = collapsingIds.has(task.id);
+          return (
+            <div
+              key={task.id}
+              className="overflow-hidden"
+              style={{
+                maxHeight: collapsing ? 0 : 480,
+                opacity: collapsing ? 0 : 1,
+                transition: collapsing
+                  ? `max-height ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${CELEBRATE_FADE_MS}ms ease`
+                  : undefined,
+              }}
+            >
+              <TaskCard
+                task={task}
+                userTask={byTaskId.get(task.id)}
+                isChild={isChild}
+                busy={busyId === task.id}
+                celebrate={celebrating}
+                onCelebrateFadeStart={() =>
+                  setCollapsingIds((prev) => {
+                    const next = new Set(prev);
+                    next.add(task.id);
+                    return next;
+                  })
+                }
+                onCelebrateDone={() => finishCelebration(task.id)}
+                onAction={(action) => void handleAction(task, action)}
+              />
+            </div>
+          );
+        })}
       </CollapsibleSection>
 
       <CollapsibleSection
@@ -258,28 +359,38 @@ export function TaskList({
               logGem={0}
               completedAt={entry.session.ended_at}
             />
-          ) : !isChild ? (
-            <div key={entry.task.id}>
-              <TaskCard
-                task={entry.task}
-                userTask={entry.userTask}
-                isChild={false}
-                busy={busyId === entry.task.id}
-                onAction={(action) => void handleAction(entry.task, action)}
-              />
-            </div>
           ) : (
-            <TaskCard
+            <div
               key={entry.task.id}
-              variant="log"
-              task={entry.task}
-              logTitle={
-                entry.task.category || entry.task.title || entry.task.task_no
+              className={
+                enteringFinishedIds.has(entry.task.id)
+                  ? "opacity-0 [animation:milestone-finished-in_1s_ease_forwards]"
+                  : undefined
               }
-              logExp={entry.task.exp}
-              logGem={entry.task.gem}
-              completedAt={entry.userTask.completed_at}
-            />
+            >
+              {!isChild ? (
+                <TaskCard
+                  task={entry.task}
+                  userTask={entry.userTask}
+                  isChild={false}
+                  busy={busyId === entry.task.id}
+                  onAction={(action) => void handleAction(entry.task, action)}
+                />
+              ) : (
+                <TaskCard
+                  variant="log"
+                  task={entry.task}
+                  logTitle={
+                    entry.task.category ||
+                    entry.task.title ||
+                    entry.task.task_no
+                  }
+                  logExp={entry.task.exp}
+                  logGem={entry.task.gem}
+                  completedAt={entry.userTask.completed_at}
+                />
+              )}
+            </div>
           ),
         )}
       </CollapsibleSection>

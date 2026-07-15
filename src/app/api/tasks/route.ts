@@ -164,12 +164,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // PASS finishes the child's task immediately (no separate claim step).
+    // PASS → verified; child must CLAIM to finish.
     const { data, error } = await supabase
       .from("user_tasks")
       .update({
-        status: "claimed",
-        completed_at: new Date().toISOString(),
+        status: "verified",
         marked_by_user_id: user.id,
         marked_by_nickname: nickname,
       })
@@ -188,7 +187,10 @@ export async function POST(request: Request) {
     }
     const { data, error } = await supabase
       .from("user_tasks")
-      .update({ status: "claimed" })
+      .update({
+        status: "claimed",
+        completed_at: new Date().toISOString(),
+      })
       .eq("id", body.user_task_id)
       .eq("user_id", user.id)
       .eq("status", "verified")
@@ -262,7 +264,7 @@ export async function POST(request: Request) {
 
     if (existing.status !== "claimed" && existing.status !== "verified") {
       return NextResponse.json(
-        { error: "Only finished tasks can be undone" },
+        { error: "Only passed or finished tasks can be undone" },
         { status: 400 },
       );
     }

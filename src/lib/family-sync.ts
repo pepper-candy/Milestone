@@ -27,9 +27,12 @@ export function getFamilySyncSenderId(): string {
   return id;
 }
 
+/** Long-lived channels keyed by child id (owned by subscribeFamilySync). */
+const liveChannels = new Map<string, RealtimeChannel>();
+
 /**
  * Fire a tiny Broadcast ping on the child's family channel.
- * Listeners refetch in the background — no row-level Realtime.
+ * Prefers an already-subscribed channel so we never spin up extra auth clients.
  */
 export async function notifyFamilySync(
   childId: string,
@@ -37,6 +40,22 @@ export async function notifyFamilySync(
   senderId: string = getFamilySyncSenderId(),
 ): Promise<void> {
   if (!childId) return;
+  const payload: FamilySyncPayload = { part, senderId, childId };
+  const existing = liveChannels.get(childId);
+  if (existing) {
+    try {
+      await existing.send({
+        type: "broadcast",
+        event: "family_sync",
+        payload,
+      });
+    } catch {
+      // Non-fatal — local UI already updated
+    }
+    return;
+  }
+
+  // Fallback when this tab is not listening (rare): one-shot send.
   const supabase = createClient();
   const channel = supabase.channel(familyChannelName(childId), {
     config: { broadcast: { self: false } },
@@ -46,19 +65,17 @@ export async function notifyFamilySync(
     const timeout = window.setTimeout(() => {
       void supabase.removeChannel(channel);
       resolve();
-    }, 2500);
+    }, 2000);
 
-    channel.subscribe(async (status) => {
+    channel.subscribe((status) => {
       if (status !== "SUBSCRIBED") return;
       window.clearTimeout(timeout);
-      const payload: FamilySyncPayload = { part, senderId, childId };
-      await channel.send({
-        type: "broadcast",
-        event: "family_sync",
-        payload,
-      });
-      void supabase.removeChannel(channel);
-      resolve();
+      void channel
+        .send({ type: "broadcast", event: "family_sync", payload })
+        .finally(() => {
+          void supabase.removeChannel(channel);
+          resolve();
+        });
     });
   });
 }
@@ -78,29 +95,32 @@ export function subscribeFamilySync(
   if (ids.length === 0) return () => {};
 
   const supabase: SupabaseClient = createClient();
-  const channels: RealtimeChannel[] = [];
+  const joined: string[] = [];
 
   for (const childId of ids) {
+    if (liveChannels.has(childId)) continue;
+
     const channel = supabase
       .channel(familyChannelName(childId), {
         config: { broadcast: { self: false } },
       })
-      .on(
-        "broadcast",
-        { event: "family_sync" },
-        ({ payload }) => {
-          const data = payload as FamilySyncPayload;
-          if (!data?.part || data.senderId === senderId) return;
-          if (data.childId && data.childId !== childId) return;
-          onPing({ ...data, childId });
-        },
-      );
+      .on("broadcast", { event: "family_sync" }, ({ payload }) => {
+        const data = payload as FamilySyncPayload;
+        if (!data?.part || data.senderId === senderId) return;
+        if (data.childId && data.childId !== childId) return;
+        onPing({ ...data, childId });
+      });
+
     channel.subscribe();
-    channels.push(channel);
+    liveChannels.set(childId, channel);
+    joined.push(childId);
   }
 
   return () => {
-    for (const ch of channels) {
+    for (const childId of joined) {
+      const ch = liveChannels.get(childId);
+      if (!ch) continue;
+      liveChannels.delete(childId);
       void supabase.removeChannel(ch);
     }
   };
