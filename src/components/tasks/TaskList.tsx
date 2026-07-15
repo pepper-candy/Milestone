@@ -368,6 +368,15 @@ export function TaskList({
     : finished.filter((entry) => entry.kind === "task");
   const hasSessionLogs = finished.some((entry) => entry.kind === "session");
 
+  const investedSeconds = finished.reduce((sum, entry) => {
+    if (entry.kind !== "session") return sum;
+    const d = entry.session.duration_seconds;
+    return sum + (typeof d === "number" && d > 0 ? d : 0);
+  }, 0);
+  const investedHours = Math.floor(investedSeconds / 3600);
+  const investedMinutes = Math.floor((investedSeconds % 3600) / 60);
+  const investedLabel = `🌱 ${investedHours}h ${investedMinutes}m invested in yourself`;
+
   const startCelebration = useCallback((taskId: string) => {
     setCelebratingIds((prev) => {
       if (prev.has(taskId)) return prev;
@@ -622,6 +631,10 @@ export function TaskList({
           );
         })}
       </CollapsibleSection>
+
+      <p className="px-1 text-center text-[11px] font-semibold tracking-[1.76px] text-[#8a7a68]">
+        {investedLabel}
+      </p>
     </div>
   );
 }

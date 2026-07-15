@@ -485,6 +485,26 @@ function useStagedExpand(enabled: boolean) {
 
 const TEXT_FADE_MS = EXIT_MS;
 
+/** Inline **bold** + preserved newlines from task-details. */
+function DetailRichText({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const bold = /^\*\*([^*]+)\*\*$/.exec(part);
+        if (bold) {
+          return (
+            <strong key={i} className="font-semibold text-ink">
+              {bold[1]}
+            </strong>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
 /** Phase-driven 0.5s fade, synced with side slide / expand. */
 function PhaseLabel({
   text,
@@ -562,9 +582,11 @@ function ExpandingBody({
   /** Inset lead (and compact mode) to clear the action rail — same width as title. */
   reserveRail?: string;
 }) {
+  // Expanded: lead stays PhaseLabel only; Aim + body are separate.
   const leadText = useExpandedCopy
     ? paragraphs[0] || compactLine
     : compactLine || paragraphs[0] || "";
+  const bodyParas = useExpandedCopy ? paragraphs.slice(1) : [];
   const innerRef = useRef<HTMLDivElement>(null);
   const [maxH, setMaxH] = useState(COLLAPSED_BODY_H);
 
@@ -577,8 +599,6 @@ function ExpandingBody({
       return;
     }
 
-    // Start clipped at one line, then animate to measured height so text
-    // stays semi-covered while the card pushes down over EXPAND_MS.
     const target = el.scrollHeight;
     setMaxH(COLLAPSED_BODY_H);
     let raf2 = 0;
@@ -613,12 +633,12 @@ function ExpandingBody({
               : "truncate text-xs leading-[16.5px] text-[#8a7a68]"
           }${reserveRail ? ` ${reserveRail}` : ""}`}
         />
-        {paragraphs.slice(1).map((para) => (
+        {bodyParas.map((para, i) => (
           <p
-            key={para}
-            className="text-xs leading-relaxed text-[rgba(28,22,16,0.72)]"
+            key={`${i}-${para.slice(0, 24)}`}
+            className="whitespace-pre-line text-xs leading-relaxed text-[rgba(28,22,16,0.72)]"
           >
-            {para}
+            <DetailRichText text={para} />
           </p>
         ))}
       </div>
@@ -773,7 +793,7 @@ export function TaskCard({
 
             <ExpandingBody
               paragraphs={detail.paragraphs}
-              compactLine={dateLine || detail.paragraphs[0] || ""}
+              compactLine={dateLine || detail.lead || ""}
               detailsOpen={detailsOpen}
               useExpandedCopy={useExpandedCopy}
               labelOpacity={labelOpacity}
@@ -921,7 +941,7 @@ export function TaskCard({
               <ExpandingBody
                 paragraphs={detail.paragraphs}
                 compactLine={
-                  compactSubtitle || detail.paragraphs[0] || ""
+                  compactSubtitle || detail.lead || ""
                 }
                 detailsOpen={detailsOpen}
                 useExpandedCopy={useExpandedCopy}
