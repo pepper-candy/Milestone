@@ -1,6 +1,7 @@
 "use client";
 
 import type { Milestone } from "@/types";
+import { getCampaignDay } from "@/lib/datetime";
 
 type MilestonePathProps = {
   milestones: Milestone[];
@@ -16,42 +17,55 @@ export function MilestonePath({
   const sorted = [...milestones].sort(
     (a, b) => a.gem_threshold - b.gem_threshold,
   );
-  const max = sorted[sorted.length - 1]?.gem_threshold ?? 40;
-  const progress = Math.min(100, (currentGems / max) * 100);
+  const cap = sorted[sorted.length - 1]?.gem_threshold ?? 40;
   const next = sorted.find((m) => m.gem_threshold > currentGems);
+  /** Progress toward the next prize (compact header). */
+  const goalGems = next?.gem_threshold ?? cap;
+  const nextProgress = Math.min(100, (currentGems / goalGems) * 100);
+  const capProgress = Math.min(100, (currentGems / cap) * 100);
+
+  const upcoming = sorted.filter((m) => m.gem_threshold > currentGems);
+  const afterNext = upcoming[1];
+
+  const compactLabel = next
+    ? next.prize_name || next.title
+    : sorted.length === 0
+      ? "Milestone path unavailable"
+      : "All milestones unlocked";
+
+  const campaignDay = getCampaignDay();
 
   if (compact) {
     return (
       <div className="rounded-2xl border border-[rgba(200,146,42,0.15)] bg-[rgba(223,238,243,0.45)] px-4 py-3">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68]">
-            Progress
+          <p className="min-w-0 truncate text-[11px] font-semibold tracking-[1.32px] text-[#8a7a68]">
+            {compactLabel}
           </p>
           <p className="text-xs font-semibold tabular-nums text-ink">
-            {currentGems.toFixed(1)} / {max} gems
+            {currentGems.toFixed(1)} / {goalGems} gems
           </p>
         </div>
         <div className="relative h-2 overflow-hidden rounded-full bg-white/70">
           <div
             className="h-full rounded-full transition-all duration-700"
             style={{
-              width: `${progress}%`,
+              width: `${nextProgress}%`,
               backgroundImage:
                 "linear-gradient(90deg, #fcdda6 0%, #d4affb 55%, #f5c34b 100%)",
             }}
           />
         </div>
-        {next ? (
-          <p className="mt-2 text-[11px] text-[#8a7a68]">
-            Next: {next.prize_name || next.title} at {next.gem_threshold}g
-          </p>
-        ) : sorted.length === 0 ? (
-          <p className="mt-2 text-[11px] text-[#8a7a68]">
-            Milestone path unavailable
-          </p>
-        ) : (
-          <p className="mt-2 text-[11px] text-[#8a7a68]">All milestones unlocked</p>
-        )}
+        {afterNext ? (
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-[11px] text-[#8a7a68]">
+              Next: {afterNext.prize_name || afterNext.title}
+            </p>
+            <p className="shrink-0 text-xs font-semibold tabular-nums text-ink">
+              Day {campaignDay}
+            </p>
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -66,7 +80,7 @@ export function MilestonePath({
           </p>
         </div>
         <span className="text-xs font-semibold uppercase tracking-wider text-gold">
-          Cap {max}
+          Cap {cap}
         </span>
       </div>
 
@@ -74,7 +88,7 @@ export function MilestonePath({
         <div
           className="h-full rounded-full transition-all duration-700"
           style={{
-            width: `${progress}%`,
+            width: `${capProgress}%`,
             backgroundImage:
               "linear-gradient(90deg, #fcdda6 0%, #d4affb 55%, #f5c34b 100%)",
           }}

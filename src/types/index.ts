@@ -8,7 +8,23 @@ export interface Profile {
   is_child: boolean;
   linked_parents: string[];
   linked_children: string[];
+  selected_child_code?: string | null;
   created_at: string;
+}
+
+export interface LinkedAccount {
+  id: string;
+  invitation_code: string;
+  nickname: string | null;
+  avatar_url: string | null;
+}
+
+export interface ProfileApiResponse {
+  profile: Profile;
+  roleLabel: "Mentor" | "Mentee";
+  selectedChildCode: string | null;
+  linkedMentees: LinkedAccount[];
+  linkedMentors: LinkedAccount[];
 }
 
 export interface Task {
@@ -100,4 +116,10 @@ export interface ActiveSessionState {
   /** UTC ISO server clock at the moment this payload was built (for client sync) */
   serverNow: string;
   isTutorial: boolean;
+}
+
+export interface DailyQuote {
+  quote: string;
+  author: string;
+  theme?: string;
 }

@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   is_child BOOLEAN DEFAULT true,
   linked_parents TEXT[] DEFAULT '{}',
   linked_children TEXT[] DEFAULT '{}',
+  selected_child_code TEXT,
   created_at TIMESTAMP DEFAULT now()
 );
 

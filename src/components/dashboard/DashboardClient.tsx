@@ -8,6 +8,7 @@ import { subscribeFamilySync, type FamilySyncPart } from "@/lib/family-sync";
 import { totalEffectiveGems } from "@/lib/scoring";
 import type {
   ActiveSessionState,
+  DailyQuote,
   Milestone,
   Profile,
   SessionLogItem,
@@ -29,6 +30,7 @@ type Props = {
   tasksWarning?: string;
   /** Child profile UUID(s) this dashboard watches (own id for child; linked kids for parent). */
   subjectIds?: string[];
+  dailyQuote: DailyQuote;
 };
 
 const COLLAPSE_THRESHOLD = 40;
@@ -37,6 +39,9 @@ const HEADER_COLLAPSED_EST = 72;
 /** Open header ≈ profile + progress + handle. */
 const HEADER_EXPANDED_EST = 170;
 const CONTENT_GAP = 12;
+const SPIN_ITEMS = ["+1 Gem", "+2 Gem", "XP x2", "Lucky", "+0.5 Gem"];
+const SPIN_ITEM_WIDTH = 70;
+const SPIN_TRACK_LENGTH = 60;
 
 export function DashboardClient({
   profile,
@@ -48,6 +53,7 @@ export function DashboardClient({
   sessionLogs = [],
   tasksWarning,
   subjectIds = [],
+  dailyQuote,
 }: Props) {
   const router = useRouter();
   const [active, setActive] = useState(initialActive);
@@ -64,6 +70,9 @@ export function DashboardClient({
     !profile.is_child ? HEADER_COLLAPSED_EST : HEADER_EXPANDED_EST,
   );
   const [headerMeasured, setHeaderMeasured] = useState(false);
+  const [spinPos, setSpinPos] = useState(20);
+  const [spinning, setSpinning] = useState(false);
+  const [spinResult, setSpinResult] = useState("Ready");
 
   const dragging = useRef(false);
   const didDrag = useRef(false);
@@ -218,6 +227,18 @@ export function DashboardClient({
     }
   }
 
+  function spinDailyWheel() {
+    if (spinning) return;
+    setSpinning(true);
+    const step = 8 + Math.floor(Math.random() * SPIN_ITEMS.length);
+    const nextPos = spinPos + step;
+    setSpinPos(nextPos);
+    window.setTimeout(() => {
+      setSpinResult(SPIN_ITEMS[nextPos % SPIN_ITEMS.length] ?? "Ready");
+      setSpinning(false);
+    }, 1150);
+  }
+
   /** Background refresh after a family-sync ping (other device / linked user). */
   async function refreshFromFamilyPing(part: FamilySyncPart) {
     if (part === "tasks" || part === "dashboard") {
@@ -303,7 +324,12 @@ export function DashboardClient({
             profileCompact ? "pb-0" : "pb-2"
           }`}
         >
-          <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => router.push("/profile")}
+            className="flex min-w-0 items-center gap-3 rounded-2xl text-left transition active:opacity-80"
+            aria-label="Open profile"
+          >
             <div className="relative size-10 shrink-0 overflow-hidden rounded-full bg-surface p-0.5">
               <div className="relative size-full overflow-hidden rounded-full bg-cream">
                 <Image
@@ -319,7 +345,7 @@ export function DashboardClient({
             <p className="truncate text-sm font-semibold text-ink">
               {profile.nickname}
             </p>
-          </div>
+          </button>
 
           <div
             className="flex shrink-0 items-center gap-3 rounded-full border border-[rgba(200,146,42,0.2)] bg-[rgba(252,221,166,0.4)] px-3.5 py-1.5"
@@ -352,6 +378,64 @@ export function DashboardClient({
               currentGems={gems}
               compact
             />
+            <div className="mt-2 rounded-2xl border border-[rgba(200,146,42,0.16)] bg-[rgba(255,250,242,0.92)] px-3 py-2.5 shadow-[inset_0px_1px_4px_0px_rgba(0,0,0,0.03)]">
+              <div className="min-w-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[1.2px] text-[rgba(28,22,16,0.55)]">
+                      Daily Quote
+                    </p>
+                    <p className="mt-0.5 line-clamp-2 text-[12px] leading-[16px] text-ink">
+                      "{dailyQuote.quote}"
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-[rgba(28,22,16,0.55)]">
+                      - {dailyQuote.author}
+                    </p>
+                  </div>
+
+                  <div className="shrink-0 rounded-[16px] border border-[rgba(123,104,238,0.3)] bg-[rgba(201,184,232,0.28)] px-3 py-2 text-center text-[#7b68ee]">
+                    <p className="text-[13px] font-semibold leading-4">Daily Spin</p>
+                    <p className="text-[10px] opacity-80">{spinning ? "Spinning..." : spinResult}</p>
+                  </div>
+                </div>
+
+                <div className="mt-2.5 rounded-xl border border-[rgba(123,104,238,0.2)] bg-[rgba(255,255,255,0.65)] px-2 py-2">
+                  <div className="relative mx-auto w-[210px] overflow-hidden">
+                    <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-px -translate-x-1/2 bg-[rgba(123,104,238,0.5)]" />
+                    <div
+                      className="flex"
+                      style={{
+                        transform: `translateX(${(1 - spinPos) * SPIN_ITEM_WIDTH}px)`,
+                        transition: spinning
+                          ? "transform 1.1s cubic-bezier(0.16, 1, 0.3, 1)"
+                          : "transform 0.2s ease-out",
+                      }}
+                    >
+                      {Array.from({ length: SPIN_TRACK_LENGTH }, (_, i) => (
+                        <div
+                          key={i}
+                          className="flex h-8 w-[70px] shrink-0 items-center justify-center px-1"
+                        >
+                          <span className="rounded-full border border-[rgba(123,104,238,0.22)] bg-[rgba(201,184,232,0.2)] px-2 py-0.5 text-[10px] font-semibold text-[#6d57e4]">
+                            {SPIN_ITEMS[i % SPIN_ITEMS.length]}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={spinDailyWheel}
+                    disabled={spinning}
+                    className="mt-2.5 flex w-full items-center justify-center rounded-full border border-[rgba(123,104,238,0.3)] bg-[rgba(201,184,232,0.28)] px-3 py-1.5 text-[11px] font-semibold text-[#6d57e4] disabled:opacity-60"
+                    aria-label="Spin daily wheel"
+                  >
+                    {spinning ? "Spinning..." : "Spin now"}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 

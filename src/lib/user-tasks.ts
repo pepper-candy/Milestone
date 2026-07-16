@@ -107,13 +107,50 @@ export async function resolveLinkedChildIds(
   return (data ?? []).map((row) => row.id as string);
 }
 
+/** Resolve parent's selected (or first) linked child invitation code → profile UUID. */
+export async function resolveSelectedChildId(
+  supabase: SupabaseClient,
+  profile: {
+    linked_children?: string[] | null;
+    selected_child_code?: string | null;
+  },
+): Promise<string | null> {
+  const codes = (profile.linked_children ?? []).filter(Boolean);
+  if (codes.length === 0) return null;
+
+  let selectedCode = profile.selected_child_code?.trim() || null;
+  if (!selectedCode || !codes.includes(selectedCode)) {
+    selectedCode = codes[0] ?? null;
+  }
+  if (!selectedCode) return null;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("invitation_code", selectedCode)
+    .maybeSingle();
+
+  if (error) {
+    console.warn(
+      "Error resolving selected child:",
+      formatSupabaseError(error),
+    );
+    return null;
+  }
+
+  return (data?.id as string | undefined) ?? null;
+}
+
 /** First linked child — used when a parent credits sessions to the child record. */
 export async function resolvePrimaryChildId(
   supabase: SupabaseClient,
   linkedChildrenCodes: string[] | null | undefined,
+  selectedChildCode?: string | null,
 ): Promise<string | null> {
-  const ids = await resolveLinkedChildIds(supabase, linkedChildrenCodes);
-  return ids[0] ?? null;
+  return resolveSelectedChildId(supabase, {
+    linked_children: linkedChildrenCodes,
+    selected_child_code: selectedChildCode,
+  });
 }
 
 /**
@@ -127,6 +164,7 @@ export async function ensureTasksForViewer(
     id: string;
     is_child: boolean;
     linked_children?: string[] | null;
+    selected_child_code?: string | null;
   },
 ): Promise<{ created: number; error?: string; subjectUserIds: string[] }> {
   if (profile.is_child) {
@@ -138,11 +176,8 @@ export async function ensureTasksForViewer(
     };
   }
 
-  const childIds = await resolveLinkedChildIds(
-    supabase,
-    profile.linked_children,
-  );
-  return { created: 0, subjectUserIds: childIds };
+  const childId = await resolveSelectedChildId(supabase, profile);
+  return { created: 0, subjectUserIds: childId ? [childId] : [] };
 }
 
 /** Load user_tasks for the viewer — own rows (child) or linked children (parent). */

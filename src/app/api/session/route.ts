@@ -40,11 +40,16 @@ async function resolveSessionSubjectId(
   profile: {
     is_child?: boolean | null;
     linked_children?: string[] | null;
+    selected_child_code?: string | null;
   } | null,
 ): Promise<string | null> {
   const isChild = profile?.is_child ?? true;
   if (isChild) return userId;
-  return resolvePrimaryChildId(supabase, profile?.linked_children);
+  return resolvePrimaryChildId(
+    supabase,
+    profile?.linked_children,
+    profile?.selected_child_code,
+  );
 }
 
 /** Live session credited to the subject child (working or parent tutorial). */
@@ -65,7 +70,7 @@ async function fetchOpenSessionForSubject(
 async function loadViewerProfile(supabase: SupabaseClient, userId: string) {
   return supabase
     .from("profiles")
-    .select("is_child, nickname, linked_children")
+    .select("is_child, nickname, linked_children, selected_child_code")
     .eq("id", userId)
     .maybeSingle();
 }

@@ -1,5 +1,6 @@
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
 import { hasNickname } from "@/lib/auth";
+import { getDailyQuote } from "@/lib/daily-quote";
 import { toUtcIso } from "@/lib/datetime";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -106,6 +107,7 @@ export default async function DashboardPage() {
     (catalogEmpty
       ? "Task catalog is blocked or empty. Run supabase/fix_grants_rls_backfill.sql in Supabase."
       : undefined);
+  const dailyQuote = getDailyQuote();
 
   return (
     <DashboardClient
@@ -118,6 +120,7 @@ export default async function DashboardPage() {
       sessionLogs={sessionLogs}
       subjectIds={subjectIds}
       tasksWarning={tasksWarning}
+      dailyQuote={dailyQuote}
     />
   );
 }
