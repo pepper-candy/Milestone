@@ -106,6 +106,14 @@ function keyForTask(task: Task): keyof typeof DETAILS | null {
   return null;
 }
 
+/** Category key used for glyph / detail lookup. */
+export function categoryKeyForTask(
+  task: Task | undefined | null,
+): keyof typeof DETAILS | null {
+  if (!task) return null;
+  return keyForTask(task);
+}
+
 export function detailForTask(
   task: Task | undefined | null,
 ): TaskDetailBlock | null {

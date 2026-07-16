@@ -7,6 +7,7 @@ import {
 } from "@/lib/invitation-code";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { ensureUserTasks } from "@/lib/user-tasks";
 import { NextResponse } from "next/server";
 
 type InviteRole = "mentee" | "mentor";
@@ -194,6 +195,13 @@ export async function POST(request: Request) {
         .from("profiles")
         .update({ linked_children: nextChildren })
         .eq("id", parent.userId);
+
+      // Seed catalog as available (unchecked) — never pending.
+      // Admin client bypasses RLS so rows exist before the mentee logs in.
+      const seed = await ensureUserTasks(admin, newUserId);
+      if (seed.error) {
+        console.warn("Invite task seed warning:", seed.error);
+      }
     } else {
       for (const childCode of inviterChildren) {
         const { data: childProfile } = await admin
@@ -224,6 +232,183 @@ export async function POST(request: Request) {
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "Could not create invitation";
+    const status = message.includes("SERVICE_ROLE") ? 503 : 500;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+/**
+ * Delete an unused linked invite (no nickname yet) that this mentor created by
+ * accident — removes link + auth user so the code can be reused.
+ * Supports unused mentees and unused co-mentors.
+ */
+export async function DELETE(request: Request) {
+  try {
+    const parent = await requireParent();
+    if ("error" in parent && parent.error) return parent.error;
+
+    const body = (await request.json()) as {
+      code?: string;
+      role?: InviteRole;
+    };
+    const code = normalizeInviteCodeInput(body.code ?? "");
+    const role: InviteRole = body.role === "mentor" ? "mentor" : "mentee";
+
+    if (!isInviteCodeFormatValid(code)) {
+      return NextResponse.json(
+        { error: "Invalid invitation code" },
+        { status: 400 },
+      );
+    }
+
+    let admin;
+    try {
+      admin = createAdminClient();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Invite deletion unavailable";
+      return NextResponse.json({ error: message }, { status: 503 });
+    }
+
+    const inviter = parent.profile;
+    const inviterChildren = (inviter.linked_children as string[] | null) ?? [];
+
+    const { data: target, error: targetError } = await admin
+      .from("profiles")
+      .select("id, nickname, is_child, linked_parents, linked_children")
+      .eq("invitation_code", code)
+      .maybeSingle();
+
+    if (targetError) {
+      return NextResponse.json({ error: targetError.message }, { status: 500 });
+    }
+    if (!target) {
+      return NextResponse.json({ error: "Account not found" }, { status: 404 });
+    }
+
+    const nickname = target.nickname as string | null;
+    if (typeof nickname === "string" && nickname.trim().length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "This account is already set up. Only unused invites can be removed.",
+        },
+        { status: 403 },
+      );
+    }
+
+    if (role === "mentee") {
+      if (!inviterChildren.includes(code) || !target.is_child) {
+        return NextResponse.json(
+          { error: "This mentee is not linked to your account" },
+          { status: 403 },
+        );
+      }
+
+      const { error: deleteAuthError } = await admin.auth.admin.deleteUser(
+        target.id as string,
+      );
+      if (deleteAuthError) {
+        return NextResponse.json(
+          { error: deleteAuthError.message },
+          { status: 500 },
+        );
+      }
+
+      const nextChildren = inviterChildren.filter((c) => c !== code);
+      const selected =
+        (inviter.selected_child_code as string | null | undefined) ?? null;
+      const nextSelected =
+        selected === code ? (nextChildren[0] ?? null) : selected;
+
+      await admin
+        .from("profiles")
+        .update({
+          linked_children: nextChildren,
+          selected_child_code: nextSelected,
+        })
+        .eq("id", parent.userId);
+
+      const { data: otherMentors } = await admin
+        .from("profiles")
+        .select("id, linked_children, selected_child_code")
+        .contains("linked_children", [code]);
+
+      for (const mentor of otherMentors ?? []) {
+        if (mentor.id === parent.userId) continue;
+        const kids = (mentor.linked_children as string[] | null) ?? [];
+        const filtered = kids.filter((c) => c !== code);
+        const sel = mentor.selected_child_code as string | null;
+        await admin
+          .from("profiles")
+          .update({
+            linked_children: filtered,
+            selected_child_code: sel === code ? (filtered[0] ?? null) : sel,
+          })
+          .eq("id", mentor.id);
+      }
+
+      return NextResponse.json({ ok: true, code, role, removed: true });
+    }
+
+    // Unused co-mentor — must appear on at least one shared mentee's linked_parents
+    if (target.is_child) {
+      return NextResponse.json(
+        { error: "This account is not a mentor invite" },
+        { status: 400 },
+      );
+    }
+
+    if (inviterChildren.length === 0) {
+      return NextResponse.json(
+        { error: "No shared mentees to unlink this mentor from" },
+        { status: 403 },
+      );
+    }
+
+    const { data: children, error: childrenError } = await admin
+      .from("profiles")
+      .select("id, invitation_code, linked_parents")
+      .in("invitation_code", inviterChildren);
+
+    if (childrenError) {
+      return NextResponse.json({ error: childrenError.message }, { status: 500 });
+    }
+
+    const linkedOn = (children ?? []).filter((child) => {
+      const parents = (child.linked_parents as string[] | null) ?? [];
+      return parents.includes(code);
+    });
+
+    if (linkedOn.length === 0) {
+      return NextResponse.json(
+        { error: "This mentor is not linked through your mentees" },
+        { status: 403 },
+      );
+    }
+
+    const { error: deleteAuthError } = await admin.auth.admin.deleteUser(
+      target.id as string,
+    );
+    if (deleteAuthError) {
+      return NextResponse.json(
+        { error: deleteAuthError.message },
+        { status: 500 },
+      );
+    }
+
+    for (const child of linkedOn) {
+      const parents = (child.linked_parents as string[] | null) ?? [];
+      await admin
+        .from("profiles")
+        .update({ linked_parents: parents.filter((p) => p !== code) })
+        .eq("id", child.id);
+    }
+
+    return NextResponse.json({ ok: true, code, role, removed: true });
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Could not remove invitation";
     const status = message.includes("SERVICE_ROLE") ? 503 : 500;
     return NextResponse.json({ error: message }, { status });
   }

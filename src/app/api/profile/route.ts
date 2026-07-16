@@ -35,6 +35,55 @@ async function resolveLinkedAccounts(
     }));
 }
 
+/**
+ * Mentors for a child = linked_parents.
+ * Co-mentors for a parent = other parents listed on shared mentees' linked_parents.
+ */
+async function resolveLinkedMentors(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  profile: Profile,
+): Promise<LinkedAccount[]> {
+  if (profile.is_child) {
+    return resolveLinkedAccounts(supabase, profile.linked_parents ?? []);
+  }
+
+  const childCodes = (profile.linked_children ?? []).filter(Boolean);
+  if (childCodes.length === 0) return [];
+
+  const { data: children, error } = await supabase
+    .from("profiles")
+    .select("linked_parents")
+    .in("invitation_code", childCodes);
+
+  if (error) {
+    console.warn("Error loading co-mentors:", error.message);
+    return [];
+  }
+
+  const mentorCodes = new Set<string>();
+  for (const child of children ?? []) {
+    const parents = (child.linked_parents as string[] | null) ?? [];
+    for (const code of parents) {
+      if (code && code !== profile.invitation_code) {
+        mentorCodes.add(code);
+      }
+    }
+  }
+
+  return resolveLinkedAccounts(supabase, [...mentorCodes]);
+}
+
+async function loadLinkedLists(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  profile: Profile,
+) {
+  const linkedMentees = profile.is_child
+    ? []
+    : await resolveLinkedAccounts(supabase, profile.linked_children ?? []);
+  const linkedMentors = await resolveLinkedMentors(supabase, profile);
+  return { linkedMentees, linkedMentors };
+}
+
 function buildProfileResponse(
   profile: Profile,
   linkedMentees: LinkedAccount[],
@@ -203,12 +252,10 @@ export async function PATCH(request: Request) {
   }
 
   const profile = updated as Profile;
-  const linkedMentees = profile.is_child
-    ? []
-    : await resolveLinkedAccounts(supabase, profile.linked_children);
-  const linkedMentors = profile.is_child
-    ? await resolveLinkedAccounts(supabase, profile.linked_parents)
-    : [];
+  const { linkedMentees, linkedMentors } = await loadLinkedLists(
+    supabase,
+    profile,
+  );
 
   return NextResponse.json(
     buildProfileResponse(profile, linkedMentees, linkedMentors),
@@ -239,12 +286,10 @@ export async function GET() {
   }
 
   const typedProfile = profile as Profile;
-  const linkedMentees = typedProfile.is_child
-    ? []
-    : await resolveLinkedAccounts(supabase, typedProfile.linked_children);
-  const linkedMentors = typedProfile.is_child
-    ? await resolveLinkedAccounts(supabase, typedProfile.linked_parents)
-    : [];
+  const { linkedMentees, linkedMentors } = await loadLinkedLists(
+    supabase,
+    typedProfile,
+  );
 
   return NextResponse.json(
     buildProfileResponse(typedProfile, linkedMentees, linkedMentors),

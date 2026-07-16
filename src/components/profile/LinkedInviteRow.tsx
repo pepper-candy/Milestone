@@ -226,9 +226,9 @@ export function LinkedInviteRow({ onInviteCreated }: Props) {
 
   return (
     <section className="flex flex-col gap-1.5">
-      <p className="text-[11px] font-semibold uppercase tracking-[1.76px] text-[#8a7a68]">
+      <h2 className="text-sm font-semibold uppercase tracking-[1.2px] text-[rgba(28,22,16,0.55)]">
         New linked invites to
-      </p>
+      </h2>
 
       <div className="overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.2)] bg-[rgba(255,250,242,0.9)] shadow-[inset_0px_1px_4px_0px_rgba(0,0,0,0.04)]">
         <div className="flex h-[54px] items-stretch">
@@ -268,7 +268,7 @@ export function LinkedInviteRow({ onInviteCreated }: Props) {
               spellCheck={false}
               autoComplete="off"
               aria-label="Invitation code"
-              className="w-full bg-transparent text-center text-base font-semibold tracking-[2.4px] text-ink outline-none placeholder:tracking-[2.4px] placeholder:text-[rgba(138,122,104,0.35)] disabled:opacity-60"
+              className="w-full bg-transparent text-center text-2xl font-semibold tracking-[3px] text-ink outline-none placeholder:text-base placeholder:font-semibold placeholder:tracking-[2.4px] placeholder:text-[rgba(138,122,104,0.35)] disabled:opacity-60"
               placeholder="— — — — —"
             />
           </div>

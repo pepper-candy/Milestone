@@ -3,6 +3,7 @@
 import { LinkedAccountCard } from "@/components/profile/LinkedAccountCard";
 import { LinkedInviteRow } from "@/components/profile/LinkedInviteRow";
 import { ProfileEditCard } from "@/components/profile/ProfileEditCard";
+import { hasNickname } from "@/lib/auth";
 import type { ProfileApiResponse } from "@/types";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -14,6 +15,7 @@ export function ProfilePageClient() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selecting, setSelecting] = useState(false);
+  const [removingCode, setRemovingCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
@@ -39,7 +41,7 @@ export function ProfilePageClient() {
     void loadProfile();
   }, [loadProfile]);
 
-  async function saveProfile(avatarUrl: string | null) {
+  async function saveProfile(avatarUrl: string | null): Promise<boolean> {
     setSaving(true);
     setError(null);
     try {
@@ -58,8 +60,10 @@ export function ProfilePageClient() {
       setData(json);
       setNickname(json.profile.nickname ?? "");
       router.refresh();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save profile");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -92,6 +96,40 @@ export function ProfilePageClient() {
     }
   }
 
+  async function removeUnusedInvite(
+    code: string,
+    role: "mentee" | "mentor",
+  ) {
+    if (!data || data.profile.is_child || removingCode) return;
+
+    const ok = window.confirm(
+      role === "mentor"
+        ? "Remove this unused co-mentor invite? The account will be deleted and the code can be used again."
+        : "Remove this unused invite? The account will be deleted and the code can be used again.",
+    );
+    if (!ok) return;
+
+    setRemovingCode(code);
+    setError(null);
+    try {
+      const res = await fetch("/api/invite", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, role }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        throw new Error(json.error || "Could not remove invite");
+      }
+      await loadProfile();
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove invite");
+    } finally {
+      setRemovingCode(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center px-4 py-16">
@@ -116,8 +154,6 @@ export function ProfilePageClient() {
   }
 
   const isParent = !data.profile.is_child;
-  const linkedList = isParent ? data.linkedMentees : data.linkedMentors;
-  const linkedHeading = isParent ? "Your mentees" : "Your mentors";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -159,49 +195,99 @@ export function ProfilePageClient() {
           </p>
         ) : null}
 
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[1.2px] text-[rgba(28,22,16,0.55)]">
-            {linkedHeading}
-          </h2>
-          {linkedList.length === 0 ? (
-            <p className="rounded-2xl bg-surface px-4 py-4 text-sm text-[rgba(28,22,16,0.55)]">
-              {isParent
-                ? "No linked mentees yet. Share your invitation code so they can join."
-                : "No linked mentors yet."}
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {linkedList.map((account) => (
-                <li key={account.id}>
-                  <LinkedAccountCard
-                    account={account}
-                    label={isParent ? "Mentee" : "Mentor"}
-                    selectable={isParent}
-                    selected={
-                      isParent && data.selectedChildCode === account.invitation_code
-                    }
-                    onSelect={
-                      isParent
-                        ? () => void selectMentee(account.invitation_code)
-                        : undefined
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-          {isParent && selecting ? (
-            <p className="mt-2 text-center text-xs text-gold">Switching mentee…</p>
-          ) : null}
-        </section>
-
         <ProfileEditCard
           nickname={nickname}
           avatarUrl={data.profile.avatar_url}
           saving={saving}
           onNicknameChange={setNickname}
-          onSave={(avatarUrl) => void saveProfile(avatarUrl)}
+          onSave={(avatarUrl) => saveProfile(avatarUrl)}
         />
+
+        {isParent ? (
+          <section className="flex flex-col gap-1.5">
+            <h2 className="text-sm font-semibold uppercase tracking-[1.2px] text-[rgba(28,22,16,0.55)]">
+              Your mentees
+            </h2>
+            {data.linkedMentees.length === 0 ? (
+              <p className="rounded-2xl bg-surface px-4 py-4 text-sm text-[rgba(28,22,16,0.55)]">
+                No linked mentees yet. Share your invitation code so they can
+                join.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {data.linkedMentees.map((account) => {
+                  const unused = !hasNickname(account.nickname);
+                  return (
+                    <li key={account.id}>
+                      <LinkedAccountCard
+                        account={account}
+                        label="Mentee"
+                        selectable
+                        selected={
+                          data.selectedChildCode === account.invitation_code
+                        }
+                        onSelect={() =>
+                          void selectMentee(account.invitation_code)
+                        }
+                        removable={unused}
+                        removing={removingCode === account.invitation_code}
+                        onRemove={() =>
+                          void removeUnusedInvite(
+                            account.invitation_code,
+                            "mentee",
+                          )
+                        }
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {selecting ? (
+              <p className="mt-2 text-center text-xs text-gold">
+                Switching mentee…
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
+        <section className="flex flex-col gap-1.5">
+          <h2 className="text-sm font-semibold uppercase tracking-[1.2px] text-[rgba(28,22,16,0.55)]">
+            Linked mentors
+          </h2>
+          {data.linkedMentors.length === 0 ? (
+            <p className="rounded-2xl bg-surface px-4 py-4 text-sm text-[rgba(28,22,16,0.55)]">
+              {isParent
+                ? "No linked mentors yet. Invite a co-mentor below."
+                : "No linked mentors yet."}
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {data.linkedMentors.map((account) => {
+                const unused = isParent && !hasNickname(account.nickname);
+                return (
+                  <li key={account.id}>
+                    <LinkedAccountCard
+                      account={account}
+                      label="Mentor"
+                      removable={unused}
+                      removing={removingCode === account.invitation_code}
+                      onRemove={
+                        unused
+                          ? () =>
+                              void removeUnusedInvite(
+                                account.invitation_code,
+                                "mentor",
+                              )
+                          : undefined
+                      }
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
         {isParent ? (
           <LinkedInviteRow onInviteCreated={() => void loadProfile()} />

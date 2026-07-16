@@ -264,9 +264,6 @@ export default function SetupPage() {
             placeholder="Your name here"
             className="h-[62px] w-full rounded-2xl border border-[rgba(200,146,42,0.2)] bg-surface px-6 text-center text-xl font-semibold tracking-[2.4px] text-ink shadow-[inset_0px_1px_4px_0px_rgba(0,0,0,0.06)] outline-none placeholder:tracking-[2.4px] placeholder:text-[rgba(138,122,104,0.4)] focus:border-gold/50"
           />
-          <p className="text-center text-xs text-text-muted">
-            Nickname can&apos;t be changed later
-          </p>
           <div className="flex min-h-4 items-center justify-center">
             {error ? (
               <p className="text-center text-sm text-red-600">{error}</p>

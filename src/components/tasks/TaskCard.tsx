@@ -5,12 +5,15 @@ import {
   BoltIcon,
   CheckIcon,
   CloseIcon,
+  FootprintsIcon,
   GemIcon,
   LockIcon,
+  MicIcon,
+  SparkIcon,
   SpinnerIcon,
   TargetIcon,
 } from "@/components/ui/Icons";
-import { detailForTask } from "@/lib/task-details";
+import { categoryKeyForTask, detailForTask } from "@/lib/task-details";
 import type { Task, UserTask } from "@/types";
 import {
   useEffect,
@@ -281,11 +284,30 @@ function TaskGlyph({
   if (claimed) {
     return <CheckIcon size={22} className="text-gold" />;
   }
-  const no = task.task_no.toLowerCase();
-  if (no.startsWith("math") || no.includes("goal")) {
-    return <TargetIcon size={24} className="text-gold" />;
+
+  const kind = categoryKeyForTask(task);
+  const iconClass = "text-gold";
+
+  switch (kind) {
+    case "community":
+      return <FootprintsIcon size={24} className={iconClass} />;
+    case "eng_speak":
+      return <MicIcon size={24} className={iconClass} />;
+    case "eng_vocab":
+      return <SparkIcon size={24} className={iconClass} />;
+    case "eng_writing":
+      return <BookIcon size={24} className={iconClass} />;
+    case "math_consolidation":
+    case "math_prelearning":
+      return <TargetIcon size={24} className={iconClass} />;
+    default: {
+      const no = task.task_no.toLowerCase();
+      if (no.startsWith("math") || no.includes("goal")) {
+        return <TargetIcon size={24} className={iconClass} />;
+      }
+      return <BookIcon size={24} className={iconClass} />;
+    }
   }
-  return <BookIcon size={24} className="text-gold" />;
 }
 
 function Rewards({ exp, gem }: { exp: number; gem: number }) {

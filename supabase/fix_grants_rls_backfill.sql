@@ -60,8 +60,11 @@ CREATE POLICY "Parents update child tasks" ON user_tasks
   );
 
 -- 4) Assign every catalog task to every child (safe to re-run)
+-- IMPORTANT: always 'available' (unchecked). Never use 'pending' here —
+-- pending means "already submitted for mentor review" and makes new mentees
+-- look pre-checked. ON CONFLICT DO NOTHING will not overwrite existing rows.
 INSERT INTO user_tasks (user_id, task_id, status)
-SELECT p.id, t.id, 'pending'
+SELECT p.id, t.id, 'available'
 FROM profiles p
 CROSS JOIN tasks t
 WHERE p.is_child = true

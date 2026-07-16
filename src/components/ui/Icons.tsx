@@ -254,3 +254,107 @@ export function SpinnerIcon({ className, size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/** Community / exploration — footsteps */
+export function FootprintsIcon({ className, size = 24 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      aria-hidden
+    >
+      {/* left foot */}
+      <ellipse
+        cx="7.2"
+        cy="8"
+        rx="2.4"
+        ry="3.2"
+        transform="rotate(-18 7.2 8)"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <circle cx="5.1" cy="13.2" r="1.05" fill="currentColor" />
+      <circle cx="7.4" cy="14.1" r="1.05" fill="currentColor" />
+      <circle cx="9.6" cy="13.5" r="1.05" fill="currentColor" />
+      {/* right foot */}
+      <ellipse
+        cx="16.8"
+        cy="11.5"
+        rx="2.4"
+        ry="3.2"
+        transform="rotate(18 16.8 11.5)"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <circle cx="14.4" cy="16.8" r="1.05" fill="currentColor" />
+      <circle cx="16.6" cy="17.7" r="1.05" fill="currentColor" />
+      <circle cx="18.8" cy="17.1" r="1.05" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Speaking / immersion — microphone */
+export function MicIcon({ className, size = 24 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      aria-hidden
+    >
+      <rect
+        x="9"
+        y="3"
+        width="6"
+        height="11"
+        rx="3"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M6.5 11a5.5 5.5 0 0 0 11 0"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M12 16.5V20M9 20h6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Vocabulary — sparkles / lightbulb-ish letters feel via chat bubbles alternate: use spark */
+export function SparkIcon({ className, size = 24 }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      className={className}
+      aria-hidden
+    >
+      <path
+        d="M12 3.5 13.2 8.5 18 9.5 13.2 10.5 12 15.5 10.8 10.5 6 9.5 10.8 8.5 12 3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M18.5 14.5 19.1 16.8 21.5 17.5 19.1 18.2 18.5 20.5 17.9 18.2 15.5 17.5 17.9 16.8 18.5 14.5Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

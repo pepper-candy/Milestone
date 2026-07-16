@@ -67,7 +67,8 @@ export async function ensureUserTasks(
   const rows = missing.map((task) => ({
     user_id: userId,
     task_id: task.id,
-    status: "available",
+    // Unchecked / not submitted. "pending" = mentee already asked for review.
+    status: "available" as const,
   }));
 
   const { error: insertError } = await supabase
