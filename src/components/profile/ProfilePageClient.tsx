@@ -3,6 +3,7 @@
 import { LinkedAccountCard } from "@/components/profile/LinkedAccountCard";
 import { LinkedInviteRow } from "@/components/profile/LinkedInviteRow";
 import { ProfileEditCard } from "@/components/profile/ProfileEditCard";
+import { SpinnerIcon } from "@/components/ui/Icons";
 import { hasNickname } from "@/lib/auth";
 import {
   fetchProfile,
@@ -24,6 +25,7 @@ export function ProfilePageClient() {
   const [selecting, setSelecting] = useState(false);
   const [removingCode, setRemovingCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [goingBack, setGoingBack] = useState(false);
 
   const applyProfile = useCallback((json: ProfileApiResponse) => {
     setCachedProfile(json);
@@ -184,20 +186,29 @@ export function ProfilePageClient() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => router.push("/dashboard")}
-            className="flex size-9 items-center justify-center rounded-full border border-[rgba(200,146,42,0.2)] bg-surface text-gold"
+            disabled={goingBack}
+            onClick={() => {
+              if (goingBack) return;
+              setGoingBack(true);
+              router.push("/dashboard");
+            }}
+            className="flex size-10 items-center justify-center rounded-full border border-[rgba(200,146,42,0.2)] bg-surface text-gold disabled:cursor-wait"
             aria-label="Back to dashboard"
           >
-            <svg
-              viewBox="0 0 20 20"
-              className="size-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden
-            >
-              <path d="M12.5 15 7.5 10l5-5" />
-            </svg>
+            {goingBack ? (
+              <SpinnerIcon size={18} className="text-gold" />
+            ) : (
+              <svg
+                viewBox="0 0 20 20"
+                className="size-6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden
+              >
+                <path d="M12.5 15 7.5 10l5-5" />
+              </svg>
+            )}
           </button>
           <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold text-ink">Profile</h1>
