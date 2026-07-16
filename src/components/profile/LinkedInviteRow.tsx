@@ -241,7 +241,11 @@ export function LinkedInviteRow({ onInviteCreated }: Props) {
                 )
               }
               aria-label={`Invite as ${role}. Tap to switch.`}
-              className="flex h-[27px] w-[78px] min-w-[78px] max-w-[78px] shrink-0 basis-[78px] items-center justify-start gap-1 rounded-full border border-[rgba(200,146,42,0.35)] bg-gold pl-2 pr-2.5 text-[11px] font-semibold uppercase tracking-[0.35px] text-[#fffaf2] transition"
+              className={`flex h-[27px] w-[78px] min-w-[78px] max-w-[78px] shrink-0 basis-[78px] items-center justify-start gap-1 rounded-full border pl-2 pr-2.5 text-[11px] font-semibold uppercase tracking-[0.35px] transition ${
+                role === "mentee"
+                  ? "border-[rgba(200,146,42,0.35)] bg-gold text-[#fffaf2]"
+                  : "border-[rgba(61,50,40,0.35)] bg-[#3d3228] text-[#f7f0e6]"
+              }`}
             >
               <SwitchIcon />
               <span>{role === "mentee" ? "Mentee" : "Mentor"}</span>
@@ -287,12 +291,11 @@ export function LinkedInviteRow({ onInviteCreated }: Props) {
                 ? "Creating invitation…"
                 : copied
                   ? "Copied!"
-                  : "Copy invitation code"}
+                  : "Copy Invitation Code"}
             </span>
           </button>
         </div>
       </div>
-
     </section>
   );
 }

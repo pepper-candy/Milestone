@@ -4,42 +4,64 @@ import { LinkedAccountCard } from "@/components/profile/LinkedAccountCard";
 import { LinkedInviteRow } from "@/components/profile/LinkedInviteRow";
 import { ProfileEditCard } from "@/components/profile/ProfileEditCard";
 import { hasNickname } from "@/lib/auth";
+import {
+  fetchProfile,
+  getCachedProfile,
+  setCachedProfile,
+} from "@/lib/profile-client-cache";
+import { invalidateSoftDashboard, markSoftDashboardStale } from "@/lib/soft-nav";
 import type { ProfileApiResponse } from "@/types";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 export function ProfilePageClient() {
   const router = useRouter();
-  const [data, setData] = useState<ProfileApiResponse | null>(null);
-  const [nickname, setNickname] = useState("");
-  const [loading, setLoading] = useState(true);
+  const cached = getCachedProfile();
+  const [data, setData] = useState<ProfileApiResponse | null>(cached);
+  const [nickname, setNickname] = useState(cached?.profile.nickname ?? "");
+  const [loading, setLoading] = useState(!cached);
   const [saving, setSaving] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [removingCode, setRemovingCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadProfile = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/profile");
-      if (!res.ok) {
-        const body = (await res.json()) as { error?: string };
-        throw new Error(body.error || "Could not load profile");
-      }
-      const json = (await res.json()) as ProfileApiResponse;
-      setData(json);
-      setNickname(json.profile.nickname ?? "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load profile");
-    } finally {
-      setLoading(false);
-    }
+  const applyProfile = useCallback((json: ProfileApiResponse) => {
+    setCachedProfile(json);
+    setData(json);
+    setNickname(json.profile.nickname ?? "");
   }, []);
 
+  const loadProfile = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!options?.silent) {
+        setLoading(!getCachedProfile());
+      }
+      setError(null);
+      try {
+        const json = await fetchProfile({ force: true });
+        applyProfile(json);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not load profile");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyProfile],
+  );
+
   useEffect(() => {
+    if (cached) {
+      setLoading(false);
+      void fetchProfile({ force: true })
+        .then(applyProfile)
+        .catch(() => {
+          /* keep cached */
+        });
+      return;
+    }
     void loadProfile();
-  }, [loadProfile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once
+  }, []);
 
   async function saveProfile(avatarUrl: string | null): Promise<boolean> {
     setSaving(true);
@@ -57,8 +79,8 @@ export function ProfilePageClient() {
       if (!res.ok) {
         throw new Error(json.error || "Could not save profile");
       }
-      setData(json);
-      setNickname(json.profile.nickname ?? "");
+      applyProfile(json);
+      markSoftDashboardStale();
       router.refresh();
       return true;
     } catch (err) {
@@ -86,7 +108,8 @@ export function ProfilePageClient() {
       if (!res.ok) {
         throw new Error(json.error || "Could not select mentee");
       }
-      setData(json);
+      applyProfile(json);
+      invalidateSoftDashboard();
       router.push("/dashboard");
       router.refresh();
     } catch (err) {
@@ -188,7 +211,7 @@ export function ProfilePageClient() {
         </div>
       </header>
 
-      <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-10 pt-2">
+      <div className="flex-1 space-y-5 overflow-y-auto px-4 pb-6 pt-2">
         {error ? (
           <p className="rounded-2xl bg-red-50 px-4 py-3 text-center text-sm text-red-600">
             {error}

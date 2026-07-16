@@ -5,6 +5,7 @@ import { TaskList } from "@/components/tasks/TaskList";
 import { SessionTimer } from "@/components/timer/SessionTimer";
 import { BoltIcon, GemIcon } from "@/components/ui/Icons";
 import { subscribeFamilySync, type FamilySyncPart } from "@/lib/family-sync";
+import { prefetchProfile } from "@/lib/profile-client-cache";
 import { totalEffectiveGems } from "@/lib/scoring";
 import type {
   ActiveSessionState,
@@ -16,6 +17,7 @@ import type {
   UserTask,
 } from "@/types";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -98,6 +100,12 @@ export function DashboardClient({
   useEffect(() => {
     collapsedRef.current = progressCollapsed;
   }, [progressCollapsed]);
+
+  // Warm profile route + API so opening profile feels instant.
+  useEffect(() => {
+    router.prefetch("/profile");
+    prefetchProfile();
+  }, [router]);
 
   // Prevent the browser from restoring a mid-list scroll under the fixed header.
   useEffect(() => {
@@ -324,9 +332,9 @@ export function DashboardClient({
             profileCompact ? "pb-0" : "pb-2"
           }`}
         >
-          <button
-            type="button"
-            onClick={() => router.push("/profile")}
+          <Link
+            href="/profile"
+            prefetch
             className="flex min-w-0 items-center gap-3 rounded-2xl text-left transition active:opacity-80"
             aria-label="Open profile"
           >
@@ -345,7 +353,7 @@ export function DashboardClient({
             <p className="truncate text-sm font-semibold text-ink">
               {profile.nickname}
             </p>
-          </button>
+          </Link>
 
           <div
             className="flex shrink-0 items-center gap-3 rounded-full border border-[rgba(200,146,42,0.2)] bg-[rgba(252,221,166,0.4)] px-3.5 py-1.5"

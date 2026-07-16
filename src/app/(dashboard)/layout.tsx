@@ -1,3 +1,4 @@
+import { SoftNavShell } from "@/components/nav/SoftNavShell";
 import { hasNickname } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
@@ -27,7 +28,7 @@ export default async function DashboardLayout({
   return (
     <div className="min-h-dvh w-full bg-[#f7f0e6]">
       <div className="mx-auto flex min-h-dvh w-full max-w-[475px] flex-col">
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+        <SoftNavShell>{children}</SoftNavShell>
       </div>
     </div>
   );
