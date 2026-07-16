@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMemberSince } from "@/lib/datetime";
 import type { LinkedAccount } from "@/types";
 import Image from "next/image";
 
@@ -31,6 +32,11 @@ export function LinkedAccountCard({
       : "border-[rgba(200,146,42,0.15)] bg-surface"
   }`;
 
+  const memberSince =
+    account.nickname && account.created_at
+      ? formatMemberSince(account.created_at)
+      : "";
+
   const avatarAndText = (
     <>
       <div className="relative size-12 shrink-0 overflow-hidden rounded-full bg-cream">
@@ -50,6 +56,11 @@ export function LinkedAccountCard({
         <p className="truncate text-base font-semibold text-ink">
           {account.nickname || "Not set up yet"}
         </p>
+        {memberSince ? (
+          <p className="truncate text-xs text-[rgba(28,22,16,0.45)]">
+            Member since {memberSince}
+          </p>
+        ) : null}
       </div>
     </>
   );

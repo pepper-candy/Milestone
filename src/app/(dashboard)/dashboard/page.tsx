@@ -3,6 +3,7 @@ import { hasNickname } from "@/lib/auth";
 import { getDailyQuote } from "@/lib/daily-quote";
 import { toUtcIso } from "@/lib/datetime";
 import { createClient } from "@/lib/supabase/server";
+import { enrichTasks } from "@/lib/task-catalog";
 import {
   ensureTasksForViewer,
   fetchViewerUserTasks,
@@ -112,7 +113,7 @@ export default async function DashboardPage() {
   return (
     <DashboardClient
       profile={typedProfile}
-      tasks={tasks ?? []}
+      tasks={enrichTasks(tasks ?? [])}
       userTasks={userTasks ?? []}
       milestones={milestones ?? []}
       initialActive={active}

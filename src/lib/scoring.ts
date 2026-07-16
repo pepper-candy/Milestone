@@ -4,12 +4,35 @@ export const NORMAL_EXP_PER_HOUR = 0.5;
 /** Tutorial sessions are 3× normal (= 1.5 EXP/hour). */
 export const TUTORIAL_EXP_PER_HOUR = NORMAL_EXP_PER_HOUR * 3;
 
+/** Creator rule: 20 EXP converts to 1 gem when the user taps Convert. */
+export const EXP_PER_GEM = 20;
+
 export function contributionFromTask(gem: number, exp: number) {
-  return gem * 20 + exp;
+  return gem * EXP_PER_GEM + exp;
 }
 
+/** Largest multiple of 20 EXP that can be converted right now. */
+export function convertibleExp(availableExp: number): number {
+  if (!Number.isFinite(availableExp) || availableExp < EXP_PER_GEM) return 0;
+  return Math.floor(availableExp / EXP_PER_GEM) * EXP_PER_GEM;
+}
+
+export function gemsFromConvertedExp(convertedExp: number): number {
+  if (!Number.isFinite(convertedExp) || convertedExp <= 0) return 0;
+  return Math.floor(convertedExp / EXP_PER_GEM);
+}
+
+/** Banked gems from Convert + task gems (integers). */
+export function displayGems(taskGems: number, convertedExp: number): number {
+  return Math.max(0, Math.floor(taskGems) + gemsFromConvertedExp(convertedExp));
+}
+
+/**
+ * Effective gems from EXP + task gems (fractional).
+ * UI should display Math.floor(...) for whole gems.
+ */
 export function totalEffectiveGems(totalExp: number, totalGems: number) {
-  return totalExp / 20 + totalGems;
+  return totalExp / EXP_PER_GEM + totalGems;
 }
 
 /** Round EXP to nearest 0.1, then return one-decimal number. */

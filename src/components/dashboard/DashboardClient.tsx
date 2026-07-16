@@ -3,8 +3,9 @@
 import { MilestonePath } from "@/components/progress/MilestonePath";
 import { TaskList } from "@/components/tasks/TaskList";
 import { SessionTimer } from "@/components/timer/SessionTimer";
-import { BoltIcon, GemIcon } from "@/components/ui/Icons";
+import { BoltIcon, GemIcon, SpinnerIcon } from "@/components/ui/Icons";
 import { subscribeFamilySync, type FamilySyncPart } from "@/lib/family-sync";
+import { getRandomQuote } from "@/lib/daily-quote";
 import { prefetchProfile } from "@/lib/profile-client-cache";
 import { totalEffectiveGems } from "@/lib/scoring";
 import type {
@@ -38,12 +39,9 @@ type Props = {
 const COLLAPSE_THRESHOLD = 40;
 /** Closed header ≈ profile row + drag handle (matches collapsed parent layout). */
 const HEADER_COLLAPSED_EST = 72;
-/** Open header ≈ profile + progress + handle. */
+/** Open header ≈ profile + progress + quote + handle. */
 const HEADER_EXPANDED_EST = 170;
 const CONTENT_GAP = 12;
-const SPIN_ITEMS = ["+1 Gem", "+2 Gem", "XP x2", "Lucky", "+0.5 Gem"];
-const SPIN_ITEM_WIDTH = 70;
-const SPIN_TRACK_LENGTH = 60;
 
 export function DashboardClient({
   profile,
@@ -72,9 +70,8 @@ export function DashboardClient({
     !profile.is_child ? HEADER_COLLAPSED_EST : HEADER_EXPANDED_EST,
   );
   const [headerMeasured, setHeaderMeasured] = useState(false);
-  const [spinPos, setSpinPos] = useState(20);
-  const [spinning, setSpinning] = useState(false);
-  const [spinResult, setSpinResult] = useState("Ready");
+  const [quote, setQuote] = useState(dailyQuote);
+  const [quoteSpinning, setQuoteSpinning] = useState(false);
 
   const dragging = useRef(false);
   const didDrag = useRef(false);
@@ -95,7 +92,8 @@ export function DashboardClient({
     return sum + (task?.gem ?? 0);
   }, 0);
   const totalExp = taskExp + liveSessionExp;
-  const gems = totalEffectiveGems(totalExp, taskGems);
+  /** Auto: EXP/20 + task gems, rounded down for display. */
+  const gems = Math.floor(totalEffectiveGems(totalExp, taskGems));
 
   useEffect(() => {
     collapsedRef.current = progressCollapsed;
@@ -126,6 +124,19 @@ export function DashboardClient({
     setLiveSessionExp(sessionExp);
   }, [sessionLogs, sessionExp]);
 
+  useEffect(() => {
+    setQuote(dailyQuote);
+  }, [dailyQuote]);
+
+  function spinQuote() {
+    if (quoteSpinning) return;
+    setQuoteSpinning(true);
+    window.setTimeout(() => {
+      setQuote(getRandomQuote(quote));
+      setQuoteSpinning(false);
+    }, 420);
+  }
+
   // Children: default expanded, auto-collapse after 10s. Parents stay collapsed.
   useEffect(() => {
     if (!profile.is_child) return;
@@ -142,7 +153,7 @@ export function DashboardClient({
     const ro = new ResizeObserver(measure);
     ro.observe(inner);
     return () => ro.disconnect();
-  }, [milestones, gems]);
+  }, [milestones, gems, quote.quote]);
 
   useLayoutEffect(() => {
     const el = headerRef.current;
@@ -233,18 +244,6 @@ export function DashboardClient({
     } catch {
       // ignore
     }
-  }
-
-  function spinDailyWheel() {
-    if (spinning) return;
-    setSpinning(true);
-    const step = 8 + Math.floor(Math.random() * SPIN_ITEMS.length);
-    const nextPos = spinPos + step;
-    setSpinPos(nextPos);
-    window.setTimeout(() => {
-      setSpinResult(SPIN_ITEMS[nextPos % SPIN_ITEMS.length] ?? "Ready");
-      setSpinning(false);
-    }, 1150);
   }
 
   /** Background refresh after a family-sync ping (other device / linked user). */
@@ -350,23 +349,25 @@ export function DashboardClient({
                 />
               </div>
             </div>
-            <p className="truncate text-sm font-semibold text-ink">
+            <p className="truncate text-base font-semibold text-ink">
               {profile.nickname}
             </p>
           </Link>
 
           <div
-            className="flex shrink-0 items-center gap-3 rounded-full border border-[rgba(200,146,42,0.2)] bg-[rgba(252,221,166,0.4)] px-3.5 py-1.5"
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-[rgba(200,146,42,0.2)] bg-[rgba(252,221,166,0.4)] py-1.5 pl-2.5 pr-2.5"
             aria-label="Your EXP and gems"
           >
             <span className="flex items-center gap-1 text-xs font-semibold text-gold">
               <BoltIcon size={14} />
               {totalExp.toFixed(1)} EXP
             </span>
-            <span className="h-3 w-px bg-[#fee685]" aria-hidden />
+            <span className="text-xs font-semibold text-[rgba(28,22,16,0.35)]" aria-hidden>
+              →
+            </span>
             <span className="flex items-center gap-1 text-xs font-semibold text-[#7b68ee]">
               <GemIcon size={14} />
-              {gems.toFixed(1)} Gem
+              {gems}
             </span>
           </div>
         </div>
@@ -386,64 +387,47 @@ export function DashboardClient({
               currentGems={gems}
               compact
             />
-            <div className="mt-2 rounded-2xl border border-[rgba(200,146,42,0.16)] bg-[rgba(255,250,242,0.92)] px-3 py-2.5 shadow-[inset_0px_1px_4px_0px_rgba(0,0,0,0.03)]">
-              <div className="min-w-0">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-[1.2px] text-[rgba(28,22,16,0.55)]">
-                      Daily Quote
-                    </p>
-                    <p className="mt-0.5 line-clamp-2 text-[12px] leading-[16px] text-ink">
-                      "{dailyQuote.quote}"
-                    </p>
-                    <p className="mt-0.5 text-[10px] text-[rgba(28,22,16,0.55)]">
-                      - {dailyQuote.author}
-                    </p>
-                  </div>
-
-                  <div className="shrink-0 rounded-[16px] border border-[rgba(123,104,238,0.3)] bg-[rgba(201,184,232,0.28)] px-3 py-2 text-center text-[#7b68ee]">
-                    <p className="text-[13px] font-semibold leading-4">Daily Spin</p>
-                    <p className="text-[10px] opacity-80">{spinning ? "Spinning..." : spinResult}</p>
-                  </div>
-                </div>
-
-                <div className="mt-2.5 rounded-xl border border-[rgba(123,104,238,0.2)] bg-[rgba(255,255,255,0.65)] px-2 py-2">
-                  <div className="relative mx-auto w-[210px] overflow-hidden">
-                    <div className="pointer-events-none absolute inset-y-0 left-1/2 z-10 w-px -translate-x-1/2 bg-[rgba(123,104,238,0.5)]" />
-                    <div
-                      className="flex"
-                      style={{
-                        transform: `translateX(${(1 - spinPos) * SPIN_ITEM_WIDTH}px)`,
-                        transition: spinning
-                          ? "transform 1.1s cubic-bezier(0.16, 1, 0.3, 1)"
-                          : "transform 0.2s ease-out",
-                      }}
+            <button
+              type="button"
+              onClick={spinQuote}
+              disabled={quoteSpinning}
+              aria-label="Show another quote"
+              className="mt-2 w-full rounded-2xl border border-[rgba(200,146,42,0.16)] bg-[rgba(255,250,242,0.92)] px-3.5 py-3 text-left shadow-[inset_0px_1px_4px_0px_rgba(0,0,0,0.03)] transition enabled:active:scale-[0.99] disabled:cursor-wait"
+            >
+              <div className="flex gap-2.5">
+                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center text-gold">
+                  {quoteSpinning ? (
+                    <SpinnerIcon size={18} className="text-gold" />
+                  ) : (
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="size-5"
+                      fill="currentColor"
+                      aria-hidden
                     >
-                      {Array.from({ length: SPIN_TRACK_LENGTH }, (_, i) => (
-                        <div
-                          key={i}
-                          className="flex h-8 w-[70px] shrink-0 items-center justify-center px-1"
-                        >
-                          <span className="rounded-full border border-[rgba(123,104,238,0.22)] bg-[rgba(201,184,232,0.2)] px-2 py-0.5 text-[10px] font-semibold text-[#6d57e4]">
-                            {SPIN_ITEMS[i % SPIN_ITEMS.length]}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={spinDailyWheel}
-                    disabled={spinning}
-                    className="mt-2.5 flex w-full items-center justify-center rounded-full border border-[rgba(123,104,238,0.3)] bg-[rgba(201,184,232,0.28)] px-3 py-1.5 text-[11px] font-semibold text-[#6d57e4] disabled:opacity-60"
-                    aria-label="Spin daily wheel"
+                      <path d="M7.2 18c-1.9 0-3.4-.6-4.4-1.7C1.6 15.1 1 13.5 1 11.4c0-2.3.7-4.3 2.1-6.1C4.6 3.5 6.7 2.3 9.4 1.7L10.2 4c-1.5.4-2.7 1.1-3.5 2.1-.8 1-1.2 2-1.2 3.1 0 .5.1.9.2 1.2.5-.3 1.1-.5 1.8-.5 1.1 0 2 .3 2.7 1 .7.6 1.1 1.5 1.1 2.6 0 1.1-.4 2-1.1 2.7-.8.7-1.7 1.1-3 1.1Zm11.2 0c-1.9 0-3.4-.6-4.4-1.7-1.2-1.2-1.8-2.8-1.8-4.9 0-2.3.7-4.3 2.1-6.1 1.5-1.8 3.6-3 6.3-3.6L21.4 4c-1.5.4-2.7 1.1-3.5 2.1-.8 1-1.2 2-1.2 3.1 0 .5.1.9.2 1.2.5-.3 1.1-.5 1.8-.5 1.1 0 2 .3 2.7 1 .7.6 1.1 1.5 1.1 2.6 0 1.1-.4 2-1.1 2.7-.8.7-1.7 1.1-3 1.1Z" />
+                    </svg>
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`text-lg font-bold leading-snug text-ink transition-opacity duration-200 ${
+                      quoteSpinning ? "opacity-40" : "opacity-100"
+                    }`}
                   >
-                    {spinning ? "Spinning..." : "Spin now"}
-                  </button>
+                    {quote.quote}
+                  </p>
+                  <div className="mt-1 flex items-end justify-between gap-3">
+                    <p className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[1.2px] text-gold">
+                      {quote.theme || "Inspiration"}
+                    </p>
+                    <p className="shrink-0 text-[11px] text-[rgba(28,22,16,0.55)]">
+                      {quote.author}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
+            </button>
           </div>
         </div>
 

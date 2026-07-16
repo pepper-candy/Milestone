@@ -9,6 +9,8 @@ export interface Profile {
   linked_parents: string[];
   linked_children: string[];
   selected_child_code?: string | null;
+  /** EXP already spent into gems via Convert (multiples of 20). */
+  converted_exp?: number;
   created_at: string;
 }
 
@@ -17,6 +19,8 @@ export interface LinkedAccount {
   invitation_code: string;
   nickname: string | null;
   avatar_url: string | null;
+  /** Profile row created_at (invite / account start). */
+  created_at: string | null;
 }
 
 export interface ProfileApiResponse {

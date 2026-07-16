@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   linked_parents TEXT[] DEFAULT '{}',
   linked_children TEXT[] DEFAULT '{}',
   selected_child_code TEXT,
+  converted_exp NUMERIC(10,1) NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT now()
 );
 

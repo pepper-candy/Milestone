@@ -1,0 +1,24 @@
+id,task_no,category,exp,gem,title,description,requires_proof,seq,prereq_1,prereq_2
+0489b6c7-84b1-4b56-9201-ceee3747083e,Math_S3_E2_P1,Consolidation,25,1,Consolidation,Reach the cut-off score.,false,5,Math_S3_E1_P1,Math_S3_E1_P2
+0ac04b89-8ae0-4564-81ee-d81e7ff20de1,Eng_Speak_1,Speaking and Immersion,10,0,Speaking and Immersion,GI followed by an IR.,false,19,,
+1590c653-91c4-4925-a6f3-7bab215c2fc5,Math_S3_E1_P1,Consolidation,10,1,Consolidation,Reach the cut-off score.,false,3,Math_S2_E2_P1,Math_S2_E2_P2
+202611ba-3386-48f9-ba64-a4fed26ca4b7,Math_S4_E1_P2,Pre-Learning,35,1,Pre-Learning,Reach the cut-off score.,false,12,Math_S4_Q_Ch4,
+2329e62a-ecac-44c4-89d8-294e5d2bd80b,Eng_Writing_B3,Writing and Grammar,30,0,Writing and Grammar,Finish Writing Task with 4 steps.,false,15,Eng_Writing_B2,
+2a2d488f-c18c-4e1e-ae38-ee563b7f1f31,Math_S4_Q_Ch1,Pre-Learning,5,1,Pre-Learning,Reach the cut-off score.,false,7,Math_S3_E2_P1,Math_S3_E2_P2
+5f67ce9f-0da9-42db-81e7-aef411a93bf4,Soc_Project_1,社區專題,35,0,社區專題,完成 5分鐘 的簡短匯報。,true,22,,
+61f5b79f-6ae8-4972-95a1-dfd2a31263b5,Eng_Writing_B2,Writing and Grammar,35,0,Writing and Grammar,Finish Writing Task with 4 steps.,false,14,,
+7123548b-1bd1-4170-bdea-956fc599ad5e,Soc_Project_2,社區專題,30,0,社區專題,完成 5分鐘 的簡短匯報。,true,23,Soc_Project_1,
+73079ea1-5f91-4f87-bdc5-d26865c40fb6,Math_S2_E2_P1,Consolidation,5,1,Consolidation,Reach the cut-off score.,false,1,,
+88be1312-aacd-4c50-9277-f864d0591a69,Math_S3_E1_P2,Consolidation,10,1,Consolidation,Reach the cut-off score.,false,4,Math_S2_E2_P1,Math_S2_E2_P2
+968da6ec-8169-4dfc-9200-52135c343ba2,Math_S4_E1_P1,Pre-Learning,35,1,Pre-Learning,Reach the cut-off score.,false,11,Math_S4_Q_Ch4,
+9c42a268-a44e-4049-a5f0-3f89edab9986,Eng_Vocab_2,Vocabulary and Idioms,10,0,Vocabulary and Idioms,Present newly learnt phrases.,false,17,Eng_Vocab_1,
+ae1e707f-324f-44cf-bf2f-e3f318ab284f,Eng_Vocab_1,Vocabulary and Idioms,15,0,Vocabulary and Idioms,Present newly learnt phrases.,false,16,,
+b13435c1-727d-485b-be15-88354688cb34,Math_S4_Q_Ch3,Pre-Learning,10,1,Pre-Learning,Reach the cut-off score.,false,9,Math_S3_E2_P1,Math_S3_E2_P2
+b907b226-7aa1-485c-b63b-2bd1cbc3ac50,Math_S3_E2_P2,Consolidation,20,1,Consolidation,Reach the cut-off score.,false,6,Math_S3_E1_P1,Math_S3_E1_P2
+c2d8d5d1-3234-4b4c-9ec7-fac0a594b9eb,Math_S4_Q_Ch4,Pre-Learning,25,1,Pre-Learning,Reach the cut-off score.,false,10,Math_S4_Q_Ch2,
+c43f94a3-125b-4020-bdbb-afecd04d4012,Eng_Vocab_3,Vocabulary and Idioms,5,0,Vocabulary and Idioms,Present newly learnt phrases.,false,18,Eng_Vocab_2,
+d1596976-f49a-40e0-874c-bd05c87782f6,Math_S2_E2_P2,Consolidation,5,1,Consolidation,Reach the cut-off score.,false,2,,
+d30ca43a-ff22-4a05-a5df-fc56b2fb48f0,Eng_Speak_3,Speaking and Immersion,5,0,Speaking and Immersion,GI followed by an IR.,false,21,Eng_Speak_2,
+d66af6c0-27af-44e1-b323-ada828473c02,Eng_Speak_2,Speaking and Immersion,5,0,Speaking and Immersion,GI followed by an IR.,false,20,Eng_Speak_1,
+db07dfe3-9b33-4884-9578-6967d66e1ba2,Math_S4_Q_Ch2,Pre-Learning,15,1,Pre-Learning,Reach the cut-off score.,false,8,Math_S3_E2_P1,Math_S3_E2_P2
+f5949257-ae12-4a79-bdfb-0e16785d12aa,Eng_Writing_A1,Writing and Grammar,25,0,Writing and Grammar,Finish Writing Task with 4 steps.,false,13,,

@@ -1,7 +1,8 @@
 "use client";
 
-import type { Milestone } from "@/types";
+import { GemIcon } from "@/components/ui/Icons";
 import { getCampaignDay } from "@/lib/datetime";
+import type { Milestone } from "@/types";
 
 type MilestonePathProps = {
   milestones: Milestone[];
@@ -21,10 +22,11 @@ export function MilestonePath({
   const next = sorted.find((m) => m.gem_threshold > currentGems);
   /** Progress toward the next prize (compact header). */
   const goalGems = next?.gem_threshold ?? cap;
-  const nextProgress = Math.min(100, (currentGems / goalGems) * 100);
-  const capProgress = Math.min(100, (currentGems / cap) * 100);
+  const gemsInt = Math.max(0, Math.floor(currentGems));
+  const nextProgress = Math.min(100, (gemsInt / goalGems) * 100);
+  const capProgress = Math.min(100, (gemsInt / cap) * 100);
 
-  const upcoming = sorted.filter((m) => m.gem_threshold > currentGems);
+  const upcoming = sorted.filter((m) => m.gem_threshold > gemsInt);
   const afterNext = upcoming[1];
 
   const compactLabel = next
@@ -42,9 +44,10 @@ export function MilestonePath({
           <p className="min-w-0 truncate text-[11px] font-semibold tracking-[1.32px] text-[#8a7a68]">
             {compactLabel}
           </p>
-          <p className="text-xs font-semibold tabular-nums text-ink">
-            {currentGems.toFixed(1)} / {goalGems} gems
-          </p>
+          <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold leading-none tabular-nums text-[#7b68ee]">
+            <GemIcon size={14} className="translate-x-0.5" />
+            {gemsInt} / {goalGems}
+          </span>
         </div>
         <div className="relative h-2 overflow-hidden rounded-full bg-white/70">
           <div
@@ -75,9 +78,7 @@ export function MilestonePath({
       <div className="mb-3 flex items-end justify-between">
         <div>
           <h2 className="text-base font-semibold text-ink">Milestone Path</h2>
-          <p className="text-sm text-text-muted">
-            {currentGems.toFixed(1)} gems earned
-          </p>
+          <p className="text-sm text-text-muted">{gemsInt} gems earned</p>
         </div>
         <span className="text-xs font-semibold uppercase tracking-wider text-gold">
           Cap {cap}
@@ -98,7 +99,7 @@ export function MilestonePath({
       <div className="relative flex justify-between gap-2">
         <div className="absolute left-3 right-3 top-4 h-[2px] bg-[rgba(200,146,42,0.25)]" />
         {sorted.slice(0, 6).map((m, i) => {
-          const unlocked = currentGems >= m.gem_threshold;
+          const unlocked = gemsInt >= m.gem_threshold;
           const isLast = i === Math.min(5, sorted.length - 1);
           return (
             <div

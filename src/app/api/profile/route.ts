@@ -12,7 +12,7 @@ async function resolveLinkedAccounts(
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, invitation_code, nickname, avatar_url")
+    .select("id, invitation_code, nickname, avatar_url, created_at")
     .in("invitation_code", filtered);
 
   if (error) {
@@ -32,6 +32,7 @@ async function resolveLinkedAccounts(
       invitation_code: row.invitation_code as string,
       nickname: (row.nickname as string | null) ?? null,
       avatar_url: (row.avatar_url as string | null) ?? null,
+      created_at: (row.created_at as string | null) ?? null,
     }));
 }
 

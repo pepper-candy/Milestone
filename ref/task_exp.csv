@@ -1,26 +1,26 @@
 seq,task_no,cat,des, exp, gem,prerequ_1,prerequ_2
 1,Math_S2_E2_P1,Consolidation,Reach the cut-off score.,5,1,,
 2,Math_S2_E2_P2,Consolidation,Reach the cut-off score.,5,1,,
-3,Math_S3_E1_P1,Consolidation,Reach the cut-off score.,15,1,Math_S2_E2_P1,Math_S2_E2_P2
-4,Math_S3_E1_P2,Consolidation,Reach the cut-off score.,15,1,Math_S2_E2_P1,Math_S2_E2_P2
-5,Math_S3_E2_P1,Consolidation,Reach the cut-off score.,5,2,Math_S3_E1_P1,Math_S3_E1_P2
-6,Math_S3_E2_P2,Consolidation,Reach the cut-off score.,5,2,Math_S3_E1_P1,Math_S3_E1_P2
-7,Math_S4_Q_Ch1,Pre-Learning,Reach the cut-off score.,0,1,Math_S3_E2_P1,Math_S3_E2_P2
-8,Math_S4_Q_Ch2,Pre-Learning,Reach the cut-off score.,10,1,Math_S3_E2_P1,Math_S3_E2_P2
-9,Math_S4_Q_Ch3,Pre-Learning,Reach the cut-off score.,5,1,Math_S3_E2_P1,Math_S3_E2_P2
-10,Math_S4_Q_Ch4,Pre-Learning,Reach the cut-off score.,5,2,Math_S4_Q_Ch2,
-11,Math_S4_E1_P1,Pre-Learning,Reach the cut-off score.,15,2,Math_S4_Q_Ch4,
-12,Math_S4_E1_P2,Pre-Learning,Reach the cut-off score.,15,2,Math_S4_Q_Ch4,
-13,Eng_Writing_A1,Writing and Grammar,Finish Writing Task with 4 steps.,5,1,,
-14,Eng_Writing_B2,Writing and Grammar,Finish Writing Task with 4 steps.,15,1,,
-15,Eng_Writing_B3,Writing and Grammar,Finish Writing Task with 4 steps.,5,1,Eng_Writing_B2,
+3,Math_S3_E1_P1,Consolidation,Reach the cut-off score.,10,1,Math_S2_E2_P1,Math_S2_E2_P2
+4,Math_S3_E1_P2,Consolidation,Reach the cut-off score.,10,1,Math_S2_E2_P1,Math_S2_E2_P2
+5,Math_S3_E2_P1,Consolidation,Reach the cut-off score.,25,1,Math_S3_E1_P1,Math_S3_E1_P2
+6,Math_S3_E2_P2,Consolidation,Reach the cut-off score.,20,1,Math_S3_E1_P1,Math_S3_E1_P2
+7,Math_S4_Q_Ch1,Pre-Learning,Reach the cut-off score.,5,1,Math_S3_E2_P1,Math_S3_E2_P2
+8,Math_S4_Q_Ch2,Pre-Learning,Reach the cut-off score.,15,1,Math_S3_E2_P1,Math_S3_E2_P2
+9,Math_S4_Q_Ch3,Pre-Learning,Reach the cut-off score.,10,1,Math_S3_E2_P1,Math_S3_E2_P2
+10,Math_S4_Q_Ch4,Pre-Learning,Reach the cut-off score.,25,1,Math_S4_Q_Ch2,
+11,Math_S4_E1_P1,Pre-Learning,Reach the cut-off score.,35,1,Math_S4_Q_Ch4,
+12,Math_S4_E1_P2,Pre-Learning,Reach the cut-off score.,35,1,Math_S4_Q_Ch4,
+13,Eng_Writing_A1,Writing and Grammar,Finish Writing Task with 4 steps.,25,0,,
+14,Eng_Writing_B2,Writing and Grammar,Finish Writing Task with 4 steps.,35,0,,
+15,Eng_Writing_B3,Writing and Grammar,Finish Writing Task with 4 steps.,30,0,Eng_Writing_B2,
 16,Eng_Vocab_1,Vocabulary and Idioms,Present newly learnt phrases.,15,0,,
 17,Eng_Vocab_2,Vocabulary and Idioms,Present newly learnt phrases.,10,0,Eng_Vocab_1,
 18,Eng_Vocab_3,Vocabulary and Idioms,Present newly learnt phrases.,5,0,Eng_Vocab_2,
 19,Eng_Speak_1,Speaking and Immersion,GI followed by an IR.,10,0,,
 20,Eng_Speak_2,Speaking and Immersion,GI followed by an IR.,5,0,Eng_Speak_1,
 21,Eng_Speak_3,Speaking and Immersion,GI followed by an IR.,5,0,Eng_Speak_2,
-22,Soc_Project_1,社區專題,完成 5分鐘 的簡短匯報。,0,2,,
-23,Soc_Project_2,社區專題,完成 5分鐘 的簡短匯報。,5,1,Soc_Project_1,
+22,Soc_Project_1,社區專題,完成 5分鐘 的簡短匯報。,35,0,,
+23,Soc_Project_2,社區專題,完成 5分鐘 的簡短匯報。,30,0,Soc_Project_1,
 ,,Working Session,,,,,
 ,,Tutorial Session,,,,,
