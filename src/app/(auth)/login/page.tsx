@@ -16,8 +16,10 @@ export default function LoginPage() {
   const [welcome, setWelcome] = useState(false);
   const [createMentor, setCreateMentor] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [mentorOfferUsed, setMentorOfferUsed] = useState(false);
 
   async function handleStartAsMentor() {
+    if (mentorOfferUsed || suggesting || loading) return;
     setSuggesting(true);
     setError(null);
     try {
@@ -29,6 +31,7 @@ export default function LoginPage() {
       }
       setCode(data.code);
       setCreateMentor(true);
+      setMentorOfferUsed(true);
     } catch {
       setError("Could not suggest a mentor code");
     } finally {
@@ -145,9 +148,15 @@ export default function LoginPage() {
 
           <button
             type="button"
-            disabled={loading || suggesting}
+            disabled={loading || suggesting || mentorOfferUsed}
             onClick={() => void handleStartAsMentor()}
-            className="-mt-1 text-center text-xs font-medium tracking-[0.3px] text-[rgba(28,22,16,0.55)] underline underline-offset-2 transition disabled:opacity-50"
+            aria-hidden={mentorOfferUsed || undefined}
+            tabIndex={mentorOfferUsed ? -1 : undefined}
+            className={`-mt-1 text-center text-xs font-medium tracking-[0.3px] text-[rgba(28,22,16,0.55)] underline underline-offset-2 transition-opacity duration-300 ${
+              mentorOfferUsed
+                ? "pointer-events-none opacity-0"
+                : "opacity-100 disabled:opacity-50"
+            }`}
           >
             {suggesting ? "Finding a code…" : "Start as a Mentor"}
           </button>

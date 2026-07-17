@@ -764,9 +764,8 @@ export function TaskList({
         alert(data.error || "Remove failed");
         return;
       }
-      // Refresh first while DELETED overlay is still up, then fade. A local
-      // tombstone blocks stale RSC props from flashing the card back.
-      await onChanged?.();
+      // Start fade/collapse immediately. Tombstone keeps the slot from
+      // disappearing (or flashing back) while refresh catches up.
       setRemovedLockIds((prev) => {
         const next = new Set(prev);
         next.add(task.id);
@@ -777,6 +776,7 @@ export function TaskList({
         next.add(task.id);
         return next;
       });
+      await onChanged?.();
       const childId = userTask?.user_id;
       if (childId) void notifyFamilySync(childId, "tasks");
     } finally {
