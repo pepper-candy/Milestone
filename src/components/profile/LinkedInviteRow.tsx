@@ -201,8 +201,8 @@ export function LinkedInviteRow({ onInviteCreated }: Props) {
 
       const payload =
         role === "mentee"
-          ? `Join me on Milestone as my mentee. Invitation code: ${normalized}`
-          : `Join me on Milestone as my mentor. Invitation code: ${normalized}`;
+          ? `Join me on Milestone (https://my-stone.vercel.app) as my mentee. Invitation code: ${normalized}`
+          : `Join me on Milestone (https://my-stone.vercel.app) as my mentor. Invitation code: ${normalized}`;
 
       await navigator.clipboard.writeText(payload);
       setCopied(true);
