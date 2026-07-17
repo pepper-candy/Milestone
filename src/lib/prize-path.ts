@@ -21,25 +21,22 @@ type WriteClient = SupabaseClient;
 
 function asStopArray(value: unknown): PrizePathStopInput[] {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((row) => {
-      if (!row || typeof row !== "object") return null;
-      const r = row as Record<string, unknown>;
-      const gem = Number(r.gem_threshold);
-      if (!Number.isFinite(gem) || gem <= 0) return null;
-      return {
-        gem_threshold: Math.floor(gem),
-        title: typeof r.title === "string" ? r.title : "",
-        prize_name:
-          typeof r.prize_name === "string" ? r.prize_name : null,
-        prize_description:
-          typeof r.prize_description === "string"
-            ? r.prize_description
-            : null,
-        icon: typeof r.icon === "string" ? r.icon : null,
-      } satisfies PrizePathStopInput;
-    })
-    .filter((s): s is PrizePathStopInput => s != null);
+  const stops: PrizePathStopInput[] = [];
+  for (const row of value) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const gem = Number(r.gem_threshold);
+    if (!Number.isFinite(gem) || gem <= 0) continue;
+    stops.push({
+      gem_threshold: Math.floor(gem),
+      title: typeof r.title === "string" ? r.title : "",
+      prize_name: typeof r.prize_name === "string" ? r.prize_name : null,
+      prize_description:
+        typeof r.prize_description === "string" ? r.prize_description : null,
+      icon: typeof r.icon === "string" ? r.icon : null,
+    });
+  }
+  return stops;
 }
 
 /** System sample template (CSV / seed content). */
