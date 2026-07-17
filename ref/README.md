@@ -14,6 +14,8 @@ This folder holds **private working materials** (DB snapshots, invite/account ex
 - Product notes that contain **no** live codes, UUIDs, GPS, or blob URLs
 - Fake sample rows only, e.g. invite code `DEMO01`, nickname `Sample Mentor`
 
+App runtime data that used to live here (e.g. daily quotes) now lives under `src/data/` so Vercel builds work without committing private `ref/` dumps.
+
 ## Blob URLs (`*.public.blob.vercel-storage.com/...`)
 
 Those URLs live **inside** snapshot CSVs / photos under `ref/`. Ignoring `ref/` keeps them out of git.  

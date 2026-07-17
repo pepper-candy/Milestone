@@ -1,5 +1,5 @@
 import { getHKLogicalDayNumber } from "@/lib/datetime";
-import quotes from "../../ref/quotes.json";
+import quotes from "@/data/quotes.json";
 
 export type DailyQuote = {
   quote: string;
