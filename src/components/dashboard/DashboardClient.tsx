@@ -487,6 +487,7 @@ export function DashboardClient({
           tasks={tasks}
           userTasks={userTasks}
           isChild={profile.is_child}
+          subjectUserId={subjectIds[0] ?? null}
           sessionLogs={logs}
           onChanged={refreshTasks}
         />

@@ -16,7 +16,6 @@ import {
   TargetIcon,
   TrashIcon,
 } from "@/components/ui/Icons";
-import { SwipeToEnter } from "@/components/ui/SwipeToEnter";
 import { categoryKeyForTask, detailForTask } from "@/lib/task-details";
 import {
   draftPrerequisites,
@@ -142,8 +141,22 @@ const CELEBRATE_CONTENT_HIDE_MS = 2000;
 const CELEBRATE_LABEL_FADE_MS = 500;
 const WASH_COLOR = "#fdefd6";
 const DELETE_WASH_MS = 1000;
+const DELETE_REVEAL_MS = 300;
 const DELETE_WASH_COLOR = "#ffcdd2";
 const DELETE_STRIP_COLOR = "#e57373";
+const DELETE_STRIP_W = 64;
+/** Chevron tab + horizontal padding; sits to the right of the w-16 sidebar. */
+const DELETE_SWIPE_TAB_W = 24;
+const DELETE_SIDEBAR_BODY_W = DELETE_STRIP_W;
+/** Vertical dash marks on the sidebar seam (dash length + gap). */
+const DELETE_SIDEBAR_DASH_LEN_PX = 8;
+const DELETE_SIDEBAR_DASH_GAP_PX = 4;
+/** Gap between resting swipe strip and the label's left edge. */
+const DELETE_LABEL_STRIP_GAP = 12;
+const DELETE_SWIPE_HANDLE_REST_W = DELETE_STRIP_W + DELETE_SWIPE_TAB_W;
+/** Extra label inset: (chevron tab width) × ¼ for visual breathing room. */
+const DELETE_LABEL_EXTRA_RESERVE =
+  (DELETE_SWIPE_HANDLE_REST_W - DELETE_SIDEBAR_BODY_W) / 4;
 
 const ICON_OPTIONS: TaskIconKey[] = [
   "target",
@@ -173,6 +186,45 @@ function defaultIconKeyForTask(task: Task): TaskIconKey {
       return "book";
     }
   }
+}
+
+function emptyDraft(): TaskUpdatePatch {
+  return {
+    task_no: "",
+    category: "",
+    description: "",
+    exp: 0,
+    gem: 0,
+    icon_key: "target",
+    detail_title: "",
+    detail_lead: "",
+    detail_extras: "",
+    prerequisites: ["", ""],
+  };
+}
+
+/** Placeholder task for parent “Add New Task” composer. */
+export function createBlankTask(): Task {
+  return {
+    id: "__new__",
+    task_no: "",
+    category: "",
+    exp: 0,
+    gem: 0,
+    title: null,
+    description: null,
+    requires_proof: false,
+    seq: null,
+    prereq_1: null,
+    prereq_2: null,
+    prereqs: null,
+    icon_key: "target",
+    detail_title: null,
+    detail_lead: null,
+    detail_aim: null,
+    detail_body: null,
+    is_catalog_template: false,
+  };
 }
 
 function draftFromTask(task: Task): TaskUpdatePatch {
@@ -310,80 +362,324 @@ function CompletionRitual({
   );
 }
 
-/** Red wash → swipe-to-delete chrome (mentee-scoped remove). */
+/** Red wash overlay → swipe from strip to delete (mentee-scoped remove). */
 function DeleteRitual({
   active,
+  closing,
   busy,
-  onCancel,
   onConfirm,
+  onCloseComplete,
 }: {
   active: boolean;
+  closing?: boolean;
   busy?: boolean;
-  onCancel: () => void;
   onConfirm: () => void | Promise<void>;
+  onCloseComplete?: () => void;
 }) {
   const [washOn, setWashOn] = useState(false);
   const [ready, setReady] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const [deleted, setDeleted] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLParagraphElement>(null);
+  const onCloseCompleteRef = useRef(onCloseComplete);
+  onCloseCompleteRef.current = onCloseComplete;
+  const [labelLeft, setLabelLeft] = useState<number | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const startX = useRef(0);
+  const startOffset = useRef(0);
+  const offsetRef = useRef(0);
+  const draggingRef = useRef(false);
 
   useEffect(() => {
-    if (!active) {
-      setWashOn(false);
-      setReady(false);
-      return;
-    }
+    if (active) return;
+    setWashOn(false);
+    setReady(false);
+    setRevealed(false);
+    setDeleted(false);
+    setOffset(0);
+    setLabelLeft(null);
+    offsetRef.current = 0;
+  }, [active]);
+
+  useEffect(() => {
+    if (!active || closing) return;
+    setRevealed(false);
+    setDeleted(false);
+    setOffset(0);
+    setLabelLeft(null);
+    offsetRef.current = 0;
     const raf = window.requestAnimationFrame(() => setWashOn(true));
     const tReady = window.setTimeout(() => setReady(true), DELETE_WASH_MS);
     return () => {
       window.cancelAnimationFrame(raf);
       window.clearTimeout(tReady);
     };
-  }, [active]);
+  }, [active, closing]);
+
+  useEffect(() => {
+    if (!ready || closing || deleted) {
+      if (!ready || closing) setRevealed(false);
+      return;
+    }
+    const raf = window.requestAnimationFrame(() => setRevealed(true));
+    return () => window.cancelAnimationFrame(raf);
+  }, [ready, closing, deleted]);
+
+  useEffect(() => {
+    if (!closing) return;
+    setRevealed(false);
+    setWashOn(false);
+    const tDone = window.setTimeout(() => {
+      setReady(false);
+      setOffset(0);
+      setLabelLeft(null);
+      offsetRef.current = 0;
+      onCloseCompleteRef.current?.();
+    }, DELETE_WASH_MS);
+    return () => window.clearTimeout(tDone);
+  }, [closing]);
+
+  useLayoutEffect(() => {
+    if (!ready || deleted || !revealed) return;
+
+    function placeLabel() {
+      const track = contentRef.current;
+      const labelEl = labelRef.current;
+      if (!track || !labelEl) return;
+      const trackW = track.clientWidth;
+      const labelW = labelEl.scrollWidth;
+      if (trackW <= 0 || labelW <= 0) return;
+      const minLeft =
+        DELETE_SWIPE_HANDLE_REST_W +
+        DELETE_LABEL_STRIP_GAP +
+        DELETE_LABEL_EXTRA_RESERVE;
+      const centeredLeft = (trackW - labelW) / 2;
+      setLabelLeft(Math.max(centeredLeft, minLeft));
+    }
+
+    placeLabel();
+    const ro = new ResizeObserver(placeLabel);
+    if (contentRef.current) ro.observe(contentRef.current);
+    return () => ro.disconnect();
+  }, [ready, deleted, revealed]);
+
+  function maxOffset() {
+    return contentRef.current?.clientWidth ?? 0;
+  }
+
+  function setHandleOffset(next: number) {
+    offsetRef.current = next;
+    setOffset(next);
+  }
+
+  function begin(clientX: number) {
+    if (!ready || !revealed || closing || busy || deleted) return;
+    draggingRef.current = true;
+    setDragging(true);
+    startX.current = clientX;
+    startOffset.current = offsetRef.current;
+  }
+
+  function move(clientX: number) {
+    if (!draggingRef.current) return;
+    const delta = clientX - startX.current;
+    const next = Math.min(
+      maxOffset(),
+      Math.max(0, startOffset.current + delta),
+    );
+    setHandleOffset(next);
+  }
+
+  async function end() {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    setDragging(false);
+    const current = offsetRef.current;
+    const limit = maxOffset();
+    const threshold = limit * 0.85;
+    if (current >= threshold) {
+      setHandleOffset(limit);
+      setDeleted(true);
+      try {
+        await onConfirm();
+      } catch {
+        setDeleted(false);
+        setHandleOffset(0);
+      }
+    } else {
+      setHandleOffset(0);
+    }
+  }
 
   if (!active) return null;
 
+  const journey = maxOffset() > 0 ? offset / maxOffset() : 0;
+  const journeyLabelOpacity = Math.max(0, 1 - journey / 0.25);
+  const labelOpacity = revealed ? journeyLabelOpacity : 0;
+  const chromeTransition = dragging
+    ? "none"
+    : `transform ${DELETE_REVEAL_MS}ms ${EASE}, opacity ${DELETE_REVEAL_MS}ms ${EASE}, width 0.25s ease-out`;
+
   return (
-    <>
+    <div
+      className="absolute inset-0 z-20 overflow-hidden rounded-2xl"
+      onClick={(e) => e.stopPropagation()}
+    >
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-20 origin-top"
+        className="pointer-events-none absolute inset-0 origin-top"
         style={{
           background: DELETE_WASH_COLOR,
           transform: washOn ? "scaleY(1)" : "scaleY(0)",
           transition: `transform ${DELETE_WASH_MS}ms ${EASE}`,
-          opacity: ready ? 0 : 1,
         }}
       />
       {ready ? (
-        <div className="absolute inset-0 z-30 flex overflow-hidden rounded-2xl">
-          <div
-            className="flex w-16 shrink-0 items-center justify-center"
-            style={{ background: DELETE_STRIP_COLOR }}
-          >
-            <TrashIcon size={22} className="text-white" />
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 bg-[#ffebee] px-3 py-2">
-            <SwipeToEnter
-              compact
-              variant="delete"
-              label="Swipe to delete"
-              loading={busy}
-              disabled={busy}
-              onComplete={onConfirm}
-            />
-            <button
-              type="button"
-              className="self-end text-[11px] font-semibold uppercase tracking-wider text-[#c62828]"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCancel();
+        <div ref={overlayRef} className="absolute inset-0">
+          <div className="relative flex h-full">
+            <div
+              ref={contentRef}
+              className="relative min-w-0 flex-1"
+              style={{
+                background: "rgba(255, 205, 210, 0.55)",
+                opacity: revealed ? 1 : 0,
+                transition: `opacity ${DELETE_REVEAL_MS}ms ${EASE}`,
               }}
             >
-              Cancel
-            </button>
+              {!deleted ? (
+                <p
+                  ref={labelRef}
+                  className="pointer-events-none absolute top-0 bottom-0 flex items-center whitespace-nowrap text-[12px] font-semibold uppercase tracking-[1.96px] text-[rgba(183,28,28,0.72)]"
+                  style={{
+                    left: labelLeft ?? "50%",
+                    transform: labelLeft == null ? "translateX(-50%)" : undefined,
+                    opacity: labelOpacity,
+                    transition: dragging
+                      ? "none"
+                      : `opacity ${DELETE_REVEAL_MS}ms ${EASE}`,
+                  }}
+                >
+                  SWIPE TO CONFIRM
+                </p>
+              ) : null}
+            </div>
+            {!deleted ? (
+              <div
+                className={`absolute left-0 top-0 bottom-0 z-10 flex touch-none ${
+                  revealed && !closing
+                    ? "cursor-grab active:cursor-grabbing"
+                    : "pointer-events-none"
+                }`}
+                style={{
+                  width: DELETE_STRIP_W + offset + DELETE_SWIPE_TAB_W,
+                  transform: revealed ? "translateX(0)" : "translateX(-100%)",
+                  transition: chromeTransition,
+                }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  begin(e.clientX);
+                }}
+                onPointerMove={(e) => {
+                  if (!draggingRef.current) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  move(e.clientX);
+                }}
+                onPointerUp={(e) => {
+                  if (!draggingRef.current) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void end();
+                }}
+                onPointerCancel={(e) => {
+                  if (!draggingRef.current) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void end();
+                }}
+              >
+                <div className="pointer-events-none absolute left-0 top-0 bottom-0 z-20 flex w-16 items-center justify-center">
+                  <TrashIcon size={24} className="text-white" />
+                </div>
+                <div
+                  className="relative box-border h-full shrink-0"
+                  style={{
+                    width: DELETE_SIDEBAR_BODY_W,
+                    background: DELETE_STRIP_COLOR,
+                  }}
+                >
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute right-0 top-0 bottom-0 w-px"
+                    style={{
+                      backgroundImage: `repeating-linear-gradient(
+                        to bottom,
+                        rgba(255, 205, 210, 0.85) 0,
+                        rgba(255, 205, 210, 0.85) ${DELETE_SIDEBAR_DASH_LEN_PX}px,
+                        transparent ${DELETE_SIDEBAR_DASH_LEN_PX}px,
+                        transparent ${DELETE_SIDEBAR_DASH_LEN_PX + DELETE_SIDEBAR_DASH_GAP_PX}px
+                      )`,
+                    }}
+                  />
+                </div>
+                <div
+                  className="h-full shrink-0"
+                  style={{
+                    width: offset,
+                    background: DELETE_STRIP_COLOR,
+                  }}
+                />
+                <div
+                  aria-hidden
+                  className="pointer-events-none flex h-full shrink-0 items-center justify-center px-2 text-white"
+                  style={{
+                    width: DELETE_SWIPE_TAB_W,
+                    background: DELETE_STRIP_COLOR,
+                  }}
+                >
+                  <svg
+                    width="8"
+                    height="12"
+                    viewBox="0 0 8 12"
+                    fill="none"
+                    aria-hidden
+                  >
+                    <path
+                      d="M1 1l5 5-5 5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+              </div>
+            ) : (
+              <div
+                className="absolute left-0 top-0 bottom-0 flex w-16 items-center justify-center"
+                style={{
+                  background: DELETE_STRIP_COLOR,
+                }}
+              >
+                <TrashIcon size={24} className="text-white" />
+              </div>
+            )}
           </div>
+          {deleted ? (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <p className="text-sm font-semibold uppercase tracking-[0.28em] text-[#b71c1c]">
+                Deleted
+              </p>
+            </div>
+          ) : null}
         </div>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -416,7 +712,18 @@ type TaskCardProps = {
   logLocationConsistent?: boolean | null;
   onAction?: (action: TaskCardAction) => void;
   /** Parent Save → persist task fields (last-write-wins). */
-  onUpdate?: (patch: TaskSavePayload) => void | Promise<void>;
+  onUpdate?: (patch: TaskSavePayload) => boolean | void | Promise<boolean | void>;
+  /** Parent create composer → insert task + assign mentee. */
+  onCreate?: (patch: TaskSavePayload) => boolean | void | Promise<boolean | void>;
+  onCancelCreate?: () => void;
+  /** New-task composer (starts in edit mode). */
+  creating?: boolean;
+  /** When creating, render inside Add New Task shell (no duplicate card chrome). */
+  creatingEmbedded?: boolean;
+  /** When creating, reveal inner fields after shell expand. */
+  createContentRevealed?: boolean;
+  /** When creating, slide sidebar in after content (embedded composer). */
+  createSidebarRevealed?: boolean;
   /** Parent Trash → mentee-scoped remove (user_tasks.removed). */
   onRemove?: () => void | Promise<void>;
   busy?: boolean;
@@ -774,7 +1081,7 @@ function PrereqSidebarStrip({
       type="button"
       aria-expanded={open}
       aria-label="Edit prerequisites"
-      className="flex w-full flex-col items-center gap-1 py-2"
+      className="flex w-full flex-col items-center justify-center gap-1"
       onClick={(e) => {
         e.stopPropagation();
         onToggle();
@@ -1107,6 +1414,25 @@ function PhaseLabel({
   );
 }
 
+const CREATE_REVEAL_MS = 500;
+const CREATE_REVEAL_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+function createContentRevealStyle(revealed: boolean): CSSProperties {
+  return {
+    opacity: revealed ? 1 : 0,
+    transition: `opacity ${CREATE_REVEAL_MS}ms ${CREATE_REVEAL_EASE}`,
+    pointerEvents: revealed ? undefined : "none",
+  };
+}
+
+function createSidebarRevealStyle(revealed: boolean): CSSProperties {
+  return {
+    opacity: revealed ? 1 : 0,
+    transform: revealed ? "translateX(0)" : "translateX(-100%)",
+    transition: `opacity ${CREATE_REVEAL_MS}ms ${CREATE_REVEAL_EASE}, transform ${CREATE_REVEAL_MS}ms ${CREATE_REVEAL_EASE}`,
+    pointerEvents: revealed ? undefined : "none",
+  };
+}
 const exitStyle = (gone: boolean): CSSProperties => ({
   opacity: gone ? 0 : 1,
   transform: gone ? "translateX(-120%)" : "translateX(0)",
@@ -1229,6 +1555,12 @@ export function TaskCard({
   logLocationConsistent,
   onAction,
   onUpdate,
+  onCreate,
+  onCancelCreate,
+  creating = false,
+  creatingEmbedded = false,
+  createContentRevealed = true,
+  createSidebarRevealed = true,
   onRemove,
   busy = false,
   celebrate = false,
@@ -1238,7 +1570,7 @@ export function TaskCard({
   onRemoveFadeStart,
   onRemoveDone,
 }: TaskCardProps) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(creating);
   const [advanceOpen, setAdvanceOpen] = useState(false);
   const [editSwapOpacity, setEditSwapOpacity] = useState(1);
   const advanceSwapTimerRef = useRef<number | null>(null);
@@ -1249,7 +1581,9 @@ export function TaskCard({
     useState(false);
   const prereqPanelTimerRef = useRef<number | null>(null);
   const prereqPanelCollapseTimerRef = useRef<number | null>(null);
-  const [draft, setDraft] = useState<TaskUpdatePatch | null>(null);
+  const [draft, setDraft] = useState<TaskUpdatePatch | null>(
+    creating ? emptyDraft() : null,
+  );
   const [catalogLookupLoading, setCatalogLookupLoading] = useState(false);
   const [catalogMatch, setCatalogMatch] = useState<Task | null>(null);
   const [loadedFromCatalogId, setLoadedFromCatalogId] = useState<string | null>(
@@ -1259,6 +1593,7 @@ export function TaskCard({
   const novelSnapshotRef = useRef<string | null>(null);
   const novelModifiedRef = useRef(false);
   const [deleteRitual, setDeleteRitual] = useState(false);
+  const [deleteClosing, setDeleteClosing] = useState(false);
   const [removeFading, setRemoveFading] = useState(false);
   const [celebrateFading, setCelebrateFading] = useState(false);
   const [celebrateContentGone, setCelebrateContentGone] = useState(false);
@@ -1266,9 +1601,9 @@ export function TaskCard({
   const logFlipBusy = useRef(false);
   const removeDoneRef = useRef(false);
 
-  const detail = detailForTask(task);
+  const detail = task ? detailForTask(task) : null;
   const interactiveBlocked =
-    celebrate || deleteRitual || removing || editing;
+    celebrate || deleteRitual || deleteClosing || removing || editing;
   const canExpand =
     Boolean(detail) && !locked && !interactiveBlocked;
 
@@ -1533,10 +1868,10 @@ export function TaskCard({
   const unmetHints = (lockHints ?? []).filter(Boolean);
   const canParentEdit =
     !isChild &&
-    parentCanEditStatus(status) &&
-    Boolean(onUpdate || onRemove) &&
     !celebrate &&
-    !removing;
+    !removing &&
+    (creating ||
+      (parentCanEditStatus(status) && Boolean(onUpdate || onRemove)));
   const compactTitle =
     (editing && draft ? draft.category : null) ||
     task.category ||
@@ -1554,7 +1889,10 @@ export function TaskCard({
             : (editing && draft
                 ? draft.description
                 : task.description) || null;
-  const showAction = !locked && !editing && !deleteRitual && Boolean(action || doneLook);
+  const showDeleteChrome = deleteRitual || deleteClosing;
+  const showAction = !locked && !editing && !showDeleteChrome && Boolean(action || doneLook);
+  const parentLockedView = locked && !isChild;
+  const showRewards = !parentLockedView;
   const displayTitle =
     useExpandedCopy && detail && !editing
       ? detail.fullTitle
@@ -1664,6 +2002,10 @@ export function TaskCard({
   }
 
   function cancelEdit() {
+    if (creating) {
+      onCancelCreate?.();
+      return;
+    }
     setEditing(false);
     setAdvanceOpen(false);
     setDraft(null);
@@ -1689,9 +2031,13 @@ export function TaskCard({
   }
 
   async function saveEdit() {
-    if (!draft || !onUpdate) return;
+    if (!draft) return;
     const { detail_aim, detail_body } = splitDetailExtras(draft.detail_extras);
     const trimmedNo = normalizeTaskNo(draft.task_no);
+    if (!trimmedNo) {
+      alert("Task code is required.");
+      return;
+    }
     let seed_catalog: boolean | undefined;
     if (loadedFromCatalogId) {
       seed_catalog = undefined;
@@ -1705,7 +2051,7 @@ export function TaskCard({
     }
     const patch: TaskSavePayload = {
       task_no: draft.task_no,
-      category: draft.category,
+      category: draft.category.trim() || (creating ? "" : task!.category),
       description: emptyToNull(draft.description ?? ""),
       exp: draft.exp,
       gem: draft.gem,
@@ -1717,7 +2063,15 @@ export function TaskCard({
       ...serializePrereqsForSave(draft.prerequisites),
       seed_catalog,
     };
-    await onUpdate(patch);
+    if (creating) {
+      if (!onCreate) return;
+      const ok = await onCreate(patch);
+      if (ok === false) return;
+      return;
+    }
+    if (!onUpdate) return;
+    const ok = await onUpdate(patch);
+    if (ok === false) return;
     setEditing(false);
     setAdvanceOpen(false);
     setDraft(null);
@@ -1729,26 +2083,48 @@ export function TaskCard({
     if (detailsOpen) collapse();
     setEditing(false);
     setDraft(null);
+    setDeleteClosing(false);
     setDeleteRitual(true);
   }
 
+  function cancelDelete() {
+    if (deleteClosing || busy) return;
+    setDeleteClosing(true);
+  }
+
+  function finishDeleteClose() {
+    setDeleteRitual(false);
+    setDeleteClosing(false);
+  }
+
   // Locked cards: parents can still edit/remove when status allows.
-  if (locked && !editing && !deleteRitual) {
+  if (locked && !editing) {
     return (
       <article
-        className={`relative flex min-h-[82px] overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.08)] bg-[rgba(240,232,216,0.5)] opacity-70 shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
-          removeFading ? "opacity-0" : ""
-        }`}
+        className={`relative flex min-h-[82px] overflow-hidden rounded-2xl shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
+          parentLockedView
+            ? "border border-[rgba(200,146,42,0.18)] bg-[rgba(255,250,242,0.9)]"
+            : "border border-[rgba(200,146,42,0.08)] bg-[rgba(240,232,216,0.5)] opacity-70"
+        } ${removeFading ? "opacity-0" : ""}`}
         style={{
           transition: removing
             ? `opacity ${CELEBRATE_FADE_MS}ms ease`
             : undefined,
         }}
       >
+        <DeleteRitual
+          active={showDeleteChrome}
+          closing={deleteClosing}
+          busy={busy}
+          onCloseComplete={finishDeleteClose}
+          onConfirm={async () => {
+            await onRemove?.();
+          }}
+        />
         {canParentEdit ? (
-          <div className="absolute top-0 right-0 z-10 flex h-[82px] flex-col items-end justify-start gap-1.5 py-3 pr-3">
+          <div className="absolute top-0 right-0 z-30 flex h-[82px] flex-col items-end justify-start gap-1.5 py-3 pr-3">
             <div className="flex items-center gap-1.5">
-              {onUpdate ? (
+              {onUpdate && !showDeleteChrome ? (
                 <CircleIconButton
                   label="Edit task"
                   tone="purple"
@@ -1760,18 +2136,35 @@ export function TaskCard({
               ) : null}
               {onRemove ? (
                 <CircleIconButton
-                  label="Remove task for mentee"
+                  label={
+                    showDeleteChrome
+                      ? "Cancel remove"
+                      : "Remove task for mentee"
+                  }
                   tone="red"
-                  disabled={busy}
-                  onClick={beginDelete}
+                  disabled={busy || deleteClosing}
+                  onClick={() =>
+                    showDeleteChrome ? cancelDelete() : beginDelete()
+                  }
                 >
-                  <TrashIcon size={14} />
+                  {showDeleteChrome ? (
+                    <CloseIcon size={14} />
+                  ) : (
+                    <TrashIcon size={14} />
+                  )}
                 </CircleIconButton>
               ) : null}
             </div>
           </div>
         ) : null}
-        <div className="flex w-16 shrink-0 items-center justify-center bg-[rgba(200,146,42,0.06)]">
+        <div
+          className="flex w-16 shrink-0 items-center justify-center"
+          style={{
+            backgroundColor: parentLockedView
+              ? WASH_COLOR
+              : "rgba(200,146,42,0.06)",
+          }}
+        >
           <TaskGlyph task={task} locked claimed={false} />
         </div>
         <div className={`min-w-0 flex-1 p-3 ${canParentEdit ? railPad : ""}`}>
@@ -1794,14 +2187,17 @@ export function TaskCard({
     );
   }
 
-  const showDeleteChrome = deleteRitual;
   const fadingOut = celebrateFading || removeFading;
 
   return (
     <article
-      className={`relative overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.18)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
-        canExpand && !editing ? "cursor-pointer" : ""
-      } ${celebrate || showDeleteChrome ? "" : "bg-[rgba(255,250,242,0.9)]"}`}
+      className={`relative overflow-hidden ${
+        creatingEmbedded
+          ? "rounded-none border-0 bg-transparent shadow-none"
+          : `rounded-2xl border border-[rgba(200,146,42,0.18)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
+              celebrate ? "" : "bg-[rgba(255,250,242,0.9)]"
+            }`
+      } ${canExpand && !editing ? "cursor-pointer" : ""}`}
       onClick={
         interactiveBlocked || editing
           ? undefined
@@ -1810,11 +2206,8 @@ export function TaskCard({
       aria-expanded={detailsOpen}
       style={{
         opacity: fadingOut ? 0 : 1,
-        background: celebrate
-          ? WASH_COLOR
-          : showDeleteChrome
-            ? DELETE_WASH_COLOR
-            : undefined,
+        background: celebrate ? WASH_COLOR : undefined,
+        minHeight: creating && createContentRevealed ? 240 : undefined,
         transition:
           celebrate || removing
             ? `opacity ${CELEBRATE_FADE_MS}ms ease`
@@ -1833,8 +2226,9 @@ export function TaskCard({
       />
       <DeleteRitual
         active={showDeleteChrome}
+        closing={deleteClosing}
         busy={busy}
-        onCancel={() => setDeleteRitual(false)}
+        onCloseComplete={finishDeleteClose}
         onConfirm={async () => {
           await onRemove?.();
         }}
@@ -1842,18 +2236,23 @@ export function TaskCard({
 
       <div
         style={{
-          opacity: celebrateContentGone || showDeleteChrome ? 0 : 1,
+          opacity: celebrateContentGone ? 0 : 1,
           transition: celebrate
             ? `opacity ${CELEBRATE_LABEL_FADE_MS}ms ease`
-            : showDeleteChrome
-              ? `opacity ${DELETE_WASH_MS}ms ease`
-              : undefined,
-          pointerEvents: showDeleteChrome ? "none" : undefined,
+            : undefined,
+          pointerEvents: celebrateContentGone ? "none" : undefined,
         }}
-        aria-hidden={celebrateContentGone || showDeleteChrome || undefined}
+        aria-hidden={celebrateContentGone || undefined}
       >
         {/* Fixed top-right rail; expanded body uses the space underneath */}
-        <div className="absolute top-0 right-0 z-10 flex min-h-[82px] flex-col items-end justify-between gap-1.5 py-3 pr-3">
+        <div
+          className="absolute top-0 right-0 z-30 flex min-h-[82px] flex-col items-end justify-between gap-1.5 py-3 pr-3"
+          style={
+            creating
+              ? createContentRevealStyle(createContentRevealed)
+              : undefined
+          }
+        >
           {editing ? (
             <div className="flex flex-col items-end gap-1.5">
               <div className="flex items-center gap-1.5">
@@ -1897,9 +2296,20 @@ export function TaskCard({
             </div>
           ) : (
             <>
-              <Rewards exp={task.exp} gem={task.gem} />
+              <div
+                className={
+                  showDeleteChrome || !showRewards
+                    ? "pointer-events-none invisible"
+                    : undefined
+                }
+                aria-hidden={showDeleteChrome || !showRewards || undefined}
+              >
+                {showRewards ? (
+                  <Rewards exp={task.exp} gem={task.gem} />
+                ) : null}
+              </div>
               <div className="flex items-center gap-1.5">
-                {canParentEdit && onUpdate ? (
+                {canParentEdit && onUpdate && !showDeleteChrome ? (
                   <CircleIconButton
                     label="Edit task"
                     tone="purple"
@@ -1909,14 +2319,24 @@ export function TaskCard({
                     <PencilIcon size={14} />
                   </CircleIconButton>
                 ) : null}
-                {canParentEdit && onRemove ? (
+                {canParentEdit && onRemove && !creating ? (
                   <CircleIconButton
-                    label="Remove task for mentee"
+                    label={
+                      showDeleteChrome
+                        ? "Cancel remove"
+                        : "Remove task for mentee"
+                    }
                     tone="red"
-                    disabled={busy}
-                    onClick={beginDelete}
+                    disabled={busy || deleteClosing}
+                    onClick={() =>
+                      showDeleteChrome ? cancelDelete() : beginDelete()
+                    }
                   >
-                    <TrashIcon size={14} />
+                    {showDeleteChrome ? (
+                      <CloseIcon size={14} />
+                    ) : (
+                      <TrashIcon size={14} />
+                    )}
                   </CircleIconButton>
                 ) : null}
                 {showAction ? (
@@ -1932,20 +2352,37 @@ export function TaskCard({
           )}
         </div>
 
-        <div className="flex items-start overflow-hidden">
+        <div
+          className={`flex items-start overflow-hidden${
+            creating && creatingEmbedded ? " relative" : ""
+          }`}
+        >
           <div
-            className="flex w-16 shrink-0 flex-col items-center justify-center gap-1.5 overflow-hidden py-2"
+            className={`flex w-16 shrink-0 flex-col items-center justify-center gap-1.5 overflow-hidden py-2${
+              creating && creatingEmbedded ? " absolute top-0 bottom-0 left-0 z-10" : ""
+            }`}
             style={{
               backgroundColor: WASH_COLOR,
-              ...exitStyle(sidesGone && !editing),
-              width: sidesGone && !editing ? 0 : 64,
-              minWidth: sidesGone && !editing ? 0 : 64,
+              ...(creating
+                ? {
+                    ...createSidebarRevealStyle(createSidebarRevealed),
+                    width: 64,
+                    minWidth: 64,
+                  }
+                : {
+                    ...exitStyle(sidesGone && !editing),
+                    width: sidesGone && !editing ? 0 : 64,
+                    minWidth: sidesGone && !editing ? 0 : 64,
+                  }),
               alignSelf: "stretch",
               minHeight: 82,
             }}
           >
             {editing && draft ? (
-              <div style={editSwapFadeStyle}>
+              <div
+                className="flex h-full w-full items-center justify-center"
+                style={editSwapFadeStyle}
+              >
                 {advanceOpen ? (
                   <PrereqSidebarStrip
                     count={filledPrereqCount(draft.prerequisites)}
@@ -1996,7 +2433,17 @@ export function TaskCard({
             )}
           </div>
 
-          <div className="min-w-0 flex-1 p-3">
+          <div
+            className="min-w-0 flex-1 p-3"
+            style={
+              creating
+                ? {
+                    ...(creatingEmbedded ? { marginLeft: 64 } : {}),
+                    ...createContentRevealStyle(createContentRevealed),
+                  }
+                : undefined
+            }
+          >
             {editing && draft ? (
               <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
                 <div className={`space-y-2 ${PARENT_EDIT_RAIL_PR}`}>

@@ -4,7 +4,7 @@
 -- 1) Table privileges (RLS alone is not enough without GRANT)
 GRANT USAGE ON SCHEMA public TO authenticated, anon;
 
-GRANT SELECT ON TABLE tasks TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON TABLE tasks TO authenticated;
 GRANT SELECT ON TABLE milestones TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON TABLE user_tasks TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON TABLE sessions TO authenticated;

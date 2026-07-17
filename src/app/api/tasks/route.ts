@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   ensureTasksForViewer,
@@ -6,6 +7,179 @@ import {
   resolveLinkedChildIds,
 } from "@/lib/user-tasks";
 import type { Profile } from "@/types";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+type TaskWritePatch = {
+  task_no?: string;
+  category?: string;
+  exp?: number;
+  gem?: number;
+  title?: string | null;
+  description?: string | null;
+  requires_proof?: boolean;
+  icon_key?: string | null;
+  detail_title?: string | null;
+  detail_lead?: string | null;
+  detail_aim?: string | null;
+  detail_body?: string | null;
+  prereq_1?: string | null;
+  prereq_2?: string | null;
+  prereqs?: string[] | null;
+  seed_catalog?: boolean;
+};
+
+const EXTENDED_TASK_COLUMNS = [
+  "icon_key",
+  "detail_title",
+  "detail_lead",
+  "detail_aim",
+  "detail_body",
+  "is_catalog_template",
+  "prereqs",
+] as const;
+
+function tasksWriteClient(supabase: SupabaseClient): {
+  client: SupabaseClient;
+  viaAdmin: boolean;
+} {
+  try {
+    return { client: createAdminClient(), viaAdmin: true };
+  } catch (err) {
+    console.warn(
+      "[tasks write] admin client unavailable, using user session:",
+      err instanceof Error ? err.message : err,
+    );
+    return { client: supabase, viaAdmin: false };
+  }
+}
+
+function isMissingColumnError(message: string): boolean {
+  return /column .* does not exist/i.test(message);
+}
+
+function isSchemaCacheColumnError(message: string, code?: string): boolean {
+  return (
+    code === "PGRST204" ||
+    /could not find the .* column of .* in the schema cache/i.test(message)
+  );
+}
+
+function isRetriableColumnError(message: string, code?: string): boolean {
+  return isMissingColumnError(message) || isSchemaCacheColumnError(message, code);
+}
+
+function buildTaskUpdateRow(patch: TaskWritePatch): Record<string, unknown> {
+  return {
+    ...(patch.task_no !== undefined ? { task_no: patch.task_no } : {}),
+    ...(patch.category !== undefined ? { category: patch.category } : {}),
+    ...(patch.exp !== undefined ? { exp: patch.exp } : {}),
+    ...(patch.gem !== undefined ? { gem: patch.gem } : {}),
+    ...(patch.title !== undefined ? { title: patch.title } : {}),
+    ...(patch.description !== undefined
+      ? { description: patch.description }
+      : {}),
+    ...(patch.requires_proof !== undefined
+      ? { requires_proof: patch.requires_proof }
+      : {}),
+    ...(patch.icon_key !== undefined ? { icon_key: patch.icon_key } : {}),
+    ...(patch.detail_title !== undefined
+      ? { detail_title: patch.detail_title }
+      : {}),
+    ...(patch.detail_lead !== undefined
+      ? { detail_lead: patch.detail_lead }
+      : {}),
+    ...(patch.detail_aim !== undefined
+      ? { detail_aim: patch.detail_aim }
+      : {}),
+    ...(patch.detail_body !== undefined
+      ? { detail_body: patch.detail_body }
+      : {}),
+    ...(patch.prereq_1 !== undefined ? { prereq_1: patch.prereq_1 } : {}),
+    ...(patch.prereq_2 !== undefined ? { prereq_2: patch.prereq_2 } : {}),
+    ...(patch.prereqs !== undefined ? { prereqs: patch.prereqs } : {}),
+    ...(patch.seed_catalog === true ? { is_catalog_template: true } : {}),
+    ...(patch.seed_catalog === false ? { is_catalog_template: false } : {}),
+  };
+}
+
+function stripExtendedTaskColumns(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...row };
+  for (const key of EXTENDED_TASK_COLUMNS) {
+    delete next[key];
+  }
+  return next;
+}
+
+function permissionDeniedHint(message: string, viaAdmin: boolean): string {
+  if (!/permission denied|42501/i.test(message)) return "";
+  if (viaAdmin) {
+    return " Service-role update was denied — check table ownership/grants for service_role.";
+  }
+  return (
+    " Your session cannot UPDATE tasks. Run supabase/fix_tasks_update_permission.sql" +
+    " in the Supabase SQL Editor, and/or set SUPABASE_SERVICE_ROLE_KEY in .env.local."
+  );
+}
+
+async function writeTaskUpdate(
+  supabase: SupabaseClient,
+  taskId: string,
+  patch: TaskWritePatch,
+) {
+  const { client, viaAdmin } = tasksWriteClient(supabase);
+  const full = buildTaskUpdateRow(patch);
+  const fallback = stripExtendedTaskColumns(full);
+  const attempts = [
+    full,
+    ...(Object.keys(fallback).length > 0 ? [fallback] : []),
+  ];
+
+  let lastError: { message: string; code?: string } | null = null;
+
+  for (const row of attempts) {
+    const result = await client
+      .from("tasks")
+      .update(row)
+      .eq("id", taskId)
+      .select("*")
+      .maybeSingle();
+
+    if (!result.error && result.data) {
+      return result;
+    }
+
+    if (result.error) {
+      lastError = result.error;
+      if (!isRetriableColumnError(result.error.message, result.error.code)) {
+        break;
+      }
+      continue;
+    }
+
+    lastError = {
+      message: "Task not found or update not permitted",
+      code: "TASK_UPDATE_EMPTY",
+    };
+    break;
+  }
+
+  if (lastError) {
+    console.error(
+      "[tasks update]",
+      lastError.code,
+      lastError.message,
+      viaAdmin ? "(admin)" : "(user session)",
+    );
+    lastError = {
+      ...lastError,
+      message: `${lastError.message}${permissionDeniedHint(lastError.message, viaAdmin)}`,
+    };
+  }
+
+  return { data: null, error: lastError };
+}
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -327,126 +501,117 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "create" && body.task) {
-    const { data, error } = await supabase
+    const childUserId = body.child_user_id;
+    if (!childUserId) {
+      return NextResponse.json(
+        { error: "child_user_id required" },
+        { status: 400 },
+      );
+    }
+
+    const linkedChildIds = await resolveLinkedChildIds(
+      supabase,
+      profile?.linked_children,
+    );
+    if (!linkedChildIds.includes(childUserId)) {
+      return NextResponse.json(
+        { error: "Task does not belong to a linked child" },
+        { status: 403 },
+      );
+    }
+
+    const patch = body.task;
+    const taskNo = String(patch.task_no ?? "").trim();
+    if (!taskNo) {
+      return NextResponse.json({ error: "task_no required" }, { status: 400 });
+    }
+
+    const { data: catalogTemplate, error: catalogError } = await supabase
       .from("tasks")
-      .insert(body.task)
+      .select("id")
+      .ilike("task_no", taskNo)
+      .eq("is_catalog_template", true)
+      .maybeSingle();
+
+    if (catalogError) {
+      return NextResponse.json({ error: catalogError.message }, { status: 500 });
+    }
+
+    let seedCatalog = patch.seed_catalog;
+    if (seedCatalog === undefined) {
+      seedCatalog = !catalogTemplate;
+    }
+
+    const { client: writeClient, viaAdmin } = tasksWriteClient(supabase);
+    const insertRow = {
+      task_no: taskNo,
+      category:
+        patch.category?.trim() ||
+        patch.detail_title?.trim() ||
+        taskNo,
+      title: patch.detail_title?.trim() || patch.category?.trim() || null,
+      description: patch.description ?? null,
+      exp: patch.exp ?? 0,
+      gem: patch.gem ?? 0,
+      requires_proof: patch.requires_proof ?? false,
+      icon_key: patch.icon_key ?? "target",
+      detail_title: patch.detail_title ?? null,
+      detail_lead: patch.detail_lead ?? null,
+      detail_aim: patch.detail_aim ?? null,
+      detail_body: patch.detail_body ?? null,
+      prereq_1: patch.prereq_1 ?? null,
+      prereq_2: patch.prereq_2 ?? null,
+      prereqs: patch.prereqs ?? null,
+      is_catalog_template: seedCatalog,
+      seq: null,
+    };
+
+    const { data: created, error: createError } = await writeClient
+      .from("tasks")
+      .insert(insertRow)
       .select("*")
       .single();
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+
+    if (createError) {
+      return NextResponse.json(
+        {
+          error: `${createError.message}${permissionDeniedHint(createError.message, viaAdmin)}`,
+        },
+        { status: 500 },
+      );
     }
-    return NextResponse.json({ task: data });
+
+    const { data: userTask, error: assignError } = await supabase
+      .from("user_tasks")
+      .insert({
+        user_id: childUserId,
+        task_id: created.id,
+        status: "available",
+      })
+      .select("*")
+      .single();
+
+    if (assignError) {
+      return NextResponse.json({ error: assignError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ task: created, userTask });
   }
 
   if (body.action === "update" && body.task_id && body.task) {
-    const patch = body.task;
-    const taskNo =
-      patch.task_no !== undefined ? String(patch.task_no).trim() : undefined;
-
-    if (taskNo) {
-      const { data: existing, error: existingError } = await supabase
-        .from("tasks")
-        .select("id")
-        .ilike("task_no", taskNo)
-        .maybeSingle();
-
-      if (existingError) {
-        return NextResponse.json({ error: existingError.message }, { status: 500 });
-      }
-
-      if (existing && existing.id !== body.task_id) {
-        if (body.user_task_id) {
-          const linkedChildIds = await resolveLinkedChildIds(
-            supabase,
-            profile?.linked_children,
-          );
-
-          const { data: assignment, error: assignmentError } = await supabase
-            .from("user_tasks")
-            .select("id, user_id, status")
-            .eq("id", body.user_task_id)
-            .maybeSingle();
-
-          if (assignmentError || !assignment) {
-            return NextResponse.json(
-              { error: assignmentError?.message || "Task assignment not found" },
-              { status: assignmentError ? 500 : 404 },
-            );
-          }
-
-          if (!linkedChildIds.includes(assignment.user_id as string)) {
-            return NextResponse.json(
-              { error: "Task does not belong to a linked child" },
-              { status: 403 },
-            );
-          }
-
-          const { data: reassigned, error: reassignError } = await supabase
-            .from("user_tasks")
-            .update({ task_id: existing.id })
-            .eq("id", body.user_task_id)
-            .select("*")
-            .single();
-
-          if (reassignError) {
-            return NextResponse.json({ error: reassignError.message }, { status: 500 });
-          }
-
-          return NextResponse.json({
-            task: existing,
-            userTask: reassigned,
-            reassigned: true,
-          });
-        }
-
-        return NextResponse.json(
-          {
-            error:
-              "This task code already exists in the catalog. Load it instead of duplicating.",
-          },
-          { status: 409 },
-        );
-      }
-    }
-
-    const { data, error } = await supabase
-      .from("tasks")
-      .update({
-        ...(patch.task_no !== undefined ? { task_no: patch.task_no } : {}),
-        ...(patch.category !== undefined ? { category: patch.category } : {}),
-        ...(patch.exp !== undefined ? { exp: patch.exp } : {}),
-        ...(patch.gem !== undefined ? { gem: patch.gem } : {}),
-        ...(patch.title !== undefined ? { title: patch.title } : {}),
-        ...(patch.description !== undefined
-          ? { description: patch.description }
-          : {}),
-        ...(patch.requires_proof !== undefined
-          ? { requires_proof: patch.requires_proof }
-          : {}),
-        ...(patch.icon_key !== undefined ? { icon_key: patch.icon_key } : {}),
-        ...(patch.detail_title !== undefined
-          ? { detail_title: patch.detail_title }
-          : {}),
-        ...(patch.detail_lead !== undefined
-          ? { detail_lead: patch.detail_lead }
-          : {}),
-        ...(patch.detail_aim !== undefined
-          ? { detail_aim: patch.detail_aim }
-          : {}),
-        ...(patch.detail_body !== undefined
-          ? { detail_body: patch.detail_body }
-          : {}),
-        ...(patch.prereq_1 !== undefined ? { prereq_1: patch.prereq_1 } : {}),
-        ...(patch.prereq_2 !== undefined ? { prereq_2: patch.prereq_2 } : {}),
-        ...(patch.prereqs !== undefined ? { prereqs: patch.prereqs } : {}),
-        ...(patch.seed_catalog === true ? { is_catalog_template: true } : {}),
-        ...(patch.seed_catalog === false ? { is_catalog_template: false } : {}),
-      })
-      .eq("id", body.task_id)
-      .select("*")
-      .single();
+    const { data, error } = await writeTaskUpdate(
+      supabase,
+      body.task_id,
+      body.task,
+    );
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      const hint = isSchemaCacheColumnError(error.message, error.code)
+        ? " Supabase schema cache is stale — run NOTIFY pgrst, 'reload schema'; in the SQL editor, or reload the API schema in project settings."
+        : "";
+      return NextResponse.json(
+        { error: `${error.message}${hint}` },
+        { status: 500 },
+      );
     }
     return NextResponse.json({ task: data });
   }

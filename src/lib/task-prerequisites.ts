@@ -1,4 +1,4 @@
-import type { Task } from "@/types";
+import type { Task, UserTask } from "@/types";
 
 export function normalizePrereqNo(no: string | null | undefined): string {
   return (no ?? "").trim();
@@ -56,32 +56,62 @@ export function buildKnownTaskNos(tasks: Task[]): Set<string> {
   return known;
 }
 
+/** Per task_no: how many assignments exist vs how many are finished (claimed). */
+export type PrereqCompletionStats = Map<
+  string,
+  { total: number; claimed: number }
+>;
+
+export function buildPrereqCompletionStats(
+  tasks: Task[],
+  userTasks: UserTask[],
+): PrereqCompletionStats {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const stats: PrereqCompletionStats = new Map();
+
+  for (const ut of userTasks) {
+    if (ut.status === "removed") continue;
+    const task = byId.get(ut.task_id);
+    if (!task) continue;
+    const no = normalizePrereqNo(task.task_no).toLowerCase();
+    if (!no) continue;
+    const row = stats.get(no) ?? { total: 0, claimed: 0 };
+    row.total += 1;
+    if (ut.status === "claimed") row.claimed += 1;
+    stats.set(no, row);
+  }
+
+  return stats;
+}
+
 /** Unknown / empty prereqs do not block unlock. */
 export function isPrereqSatisfied(
   prereq: string,
-  claimedNos: Set<string>,
+  stats: PrereqCompletionStats,
   knownTaskNos: Set<string>,
 ): boolean {
   const n = normalizePrereqNo(prereq).toLowerCase();
   if (!n) return true;
   if (!knownTaskNos.has(n)) return true;
-  return claimedNos.has(n);
+  const row = stats.get(n);
+  if (!row || row.total === 0) return true;
+  return row.claimed >= row.total;
 }
 
 export function isTaskUnlocked(
   task: Pick<Task, "prereq_1" | "prereq_2" | "prereqs">,
-  claimedNos: Set<string>,
+  stats: PrereqCompletionStats,
   knownTaskNos: Set<string>,
 ): boolean {
   for (const prereq of taskPrereqList(task)) {
-    if (!isPrereqSatisfied(prereq, claimedNos, knownTaskNos)) return false;
+    if (!isPrereqSatisfied(prereq, stats, knownTaskNos)) return false;
   }
   return true;
 }
 
 export function unmetPrereqHints(
   task: Pick<Task, "prereq_1" | "prereq_2" | "prereqs">,
-  claimedNos: Set<string>,
+  stats: PrereqCompletionStats,
   knownTaskNos: Set<string>,
 ): string[] {
   const hints: string[] = [];
@@ -89,7 +119,9 @@ export function unmetPrereqHints(
     const n = normalizePrereqNo(prereq);
     if (!n) continue;
     if (!knownTaskNos.has(n.toLowerCase())) continue;
-    if (!claimedNos.has(n.toLowerCase())) hints.push(`Requires ${n}`);
+    if (!isPrereqSatisfied(prereq, stats, knownTaskNos)) {
+      hints.push(`Requires ${n}`);
+    }
   }
   return hints;
 }

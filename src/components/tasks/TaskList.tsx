@@ -3,15 +3,16 @@
 import {
   TaskCard,
   CELEBRATE_FADE_MS,
+  createBlankTask,
   type TaskCardAction,
   type TaskSavePayload,
-  type TaskUpdatePatch,
 } from "@/components/tasks/TaskCard";
 import { ChevronDownIcon } from "@/components/ui/Icons";
 import { notifyFamilySync } from "@/lib/family-sync";
 import { enrichTasks } from "@/lib/task-catalog";
 import {
   buildKnownTaskNos,
+  buildPrereqCompletionStats,
   isTaskUnlocked,
   unmetPrereqHints,
 } from "@/lib/task-prerequisites";
@@ -29,6 +30,8 @@ type TaskListProps = {
   tasks: Task[];
   userTasks: UserTask[];
   isChild: boolean;
+  /** Mentee user id when parent is viewing a linked child. */
+  subjectUserId?: string | null;
   sessionLogs?: SessionLogItem[];
   onChanged?: () => void | Promise<void>;
 };
@@ -46,6 +49,180 @@ const SESSION_SLOT_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 const SECTION_ANIM_MS = 500;
 const SECTION_ANIM_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+const ADD_BUTTON_H = 38;
+/** Edit-card clip height while the shell expands. */
+const ADD_CARD_H = 280;
+/** How long to fade inner content before collapsing height back down. */
+const CLOSE_CONTENT_FADE_BEFORE_COLLAPSE_MS = 220;
+/** Fade the button text back in after collapse. */
+const BUTTON_FADE_IN_MS = 200;
+
+const ADD_SHELL_CLASS =
+  "overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.22)] bg-[rgba(255,250,242,0.95)] shadow-[0px_2px_8px_0px_rgba(200,146,42,0.08)]";
+
+type AddTaskPhase = "idle" | "expand" | "revealed";
+
+function AddNewTaskBlock({
+  busy,
+  onCreate,
+  onActiveChange,
+}: {
+  busy: boolean;
+  onCreate: (
+    patch: TaskSavePayload,
+  ) => boolean | void | Promise<boolean | void>;
+  onActiveChange?: (active: boolean) => void;
+}) {
+  const [phase, setPhase] = useState<AddTaskPhase>("idle");
+  const [expandOpen, setExpandOpen] = useState(false);
+  const [labelVisible, setLabelVisible] = useState(true);
+  const [contentRevealed, setContentRevealed] = useState(false);
+  const [sidebarRevealed, setSidebarRevealed] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [buttonOpacity, setButtonOpacity] = useState(1);
+  const timers = useRef<number[]>([]);
+
+  useEffect(() => {
+    return () => {
+      for (const id of timers.current) window.clearTimeout(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    onActiveChange?.(phase !== "idle");
+  }, [phase, onActiveChange]);
+
+  function clearTimers() {
+    for (const id of timers.current) window.clearTimeout(id);
+    timers.current = [];
+  }
+
+  function after(ms: number, fn: () => void) {
+    timers.current.push(window.setTimeout(fn, ms));
+  }
+
+  function close() {
+    clearTimers();
+    setClosing(true);
+    setPhase("expand");
+    setExpandOpen(true);
+    setLabelVisible(false);
+    setContentRevealed(false);
+    setSidebarRevealed(false);
+    setButtonOpacity(0);
+
+    after(CLOSE_CONTENT_FADE_BEFORE_COLLAPSE_MS, () => {
+      setExpandOpen(false);
+    });
+
+    after(
+      CLOSE_CONTENT_FADE_BEFORE_COLLAPSE_MS + SECTION_ANIM_MS,
+      () => {
+        setPhase("idle");
+        setClosing(false);
+        setButtonOpacity(0);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => setButtonOpacity(1));
+        });
+      },
+    );
+  }
+
+  function open() {
+    if (phase !== "idle") return;
+    setClosing(false);
+    setPhase("expand");
+    setExpandOpen(false);
+    setLabelVisible(true);
+    setContentRevealed(false);
+    setSidebarRevealed(false);
+    setButtonOpacity(0);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setLabelVisible(false);
+        setExpandOpen(true);
+      });
+    });
+    after(SECTION_ANIM_MS, () => {
+      setPhase("revealed");
+      setContentRevealed(true);
+      setSidebarRevealed(true);
+    });
+  }
+
+  async function handleCreate(patch: TaskSavePayload) {
+    const ok = await onCreate(patch);
+    if (ok !== false) close();
+    return ok;
+  }
+
+  const opening = phase !== "idle";
+
+  return (
+    <div className={`px-1 ${opening ? "pb-3" : ""}`}>
+      <div
+        className={`${ADD_SHELL_CLASS} overflow-hidden`}
+        style={{
+          maxHeight: expandOpen ? ADD_CARD_H : ADD_BUTTON_H,
+          transition:
+            opening || expandOpen
+              ? `max-height ${SECTION_ANIM_MS}ms ${SECTION_ANIM_EASE}`
+              : undefined,
+        }}
+      >
+        <div className="relative">
+          {opening ? (
+            <TaskCard
+              task={createBlankTask()}
+              isChild={false}
+              creating
+              creatingEmbedded
+              createContentRevealed={contentRevealed}
+              createSidebarRevealed={sidebarRevealed}
+              busy={busy}
+              onCreate={(patch) => handleCreate(patch)}
+              onCancelCreate={close}
+            />
+          ) : null}
+
+          {phase === "idle" ? (
+            <button
+              type="button"
+              aria-label="Add new task"
+              onClick={open}
+              className="flex w-full items-center justify-center px-4 py-2.5 transition hover:bg-[rgba(252,221,166,0.28)] active:brightness-95"
+              style={{
+                height: ADD_BUTTON_H,
+                opacity: buttonOpacity,
+                transition: `opacity ${BUTTON_FADE_IN_MS}ms ease`,
+              }}
+            >
+              <span className="text-[11px] font-semibold uppercase tracking-[1.4px] text-gold">
+                Add New Task
+              </span>
+            </button>
+          ) : phase === "expand" && !closing ? (
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center"
+              style={{ height: ADD_BUTTON_H }}
+              aria-hidden
+            >
+              <span
+                className="text-[11px] font-semibold uppercase tracking-[1.4px] text-gold"
+                style={{
+                  opacity: labelVisible ? 1 : 0,
+                  transition: `opacity ${SECTION_ANIM_MS}ms ease`,
+                }}
+              >
+                Add New Task
+              </span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function CollapsibleSection({
   title,
@@ -195,12 +372,10 @@ function seqOf(task: Task): number {
 }
 
 function buildClaimedNos(tasks: Task[], userTasks: UserTask[]): Set<string> {
-  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const stats = buildPrereqCompletionStats(tasks, userTasks);
   const claimed = new Set<string>();
-  for (const ut of userTasks) {
-    if (ut.status !== "claimed") continue;
-    const t = byId.get(ut.task_id);
-    if (t) claimed.add((t.task_no ?? "").trim().toLowerCase());
+  for (const [no, row] of stats) {
+    if (row.claimed > 0) claimed.add(no);
   }
   return claimed;
 }
@@ -213,19 +388,21 @@ function partitionTasks(
   removingIds: Set<string>,
 ) {
   const byTaskId = new Map(userTasks.map((ut) => [ut.task_id, ut]));
+  const assignedTasks = tasks.filter((task) => byTaskId.has(task.id));
+  const prereqStats = buildPrereqCompletionStats(tasks, userTasks);
+  const knownTaskNos = buildKnownTaskNos(assignedTasks);
   const claimedNos = buildClaimedNos(tasks, userTasks);
-  const knownTaskNos = buildKnownTaskNos(tasks);
 
   const yourTasks: Task[] = [];
   const lockedTasks: Task[] = [];
   const finishedTasks: FinishedEntry[] = [];
 
-  for (const task of tasks) {
-    const ut = byTaskId.get(task.id);
+  for (const task of assignedTasks) {
+    const ut = byTaskId.get(task.id)!;
     // Hide mentee-removed assignments, except while the delete fade/collapse runs.
     if (ut?.status === "removed" && !removingIds.has(task.id)) continue;
 
-    const unlocked = isTaskUnlocked(task, claimedNos, knownTaskNos);
+    const unlocked = isTaskUnlocked(task, prereqStats, knownTaskNos);
 
     // Keep celebrating claimed cards in Your Tasks until the 5s ritual ends.
     if (ut?.status === "claimed" && celebratingIds.has(task.id)) {
@@ -270,17 +447,27 @@ function partitionTasks(
     })),
   ].sort((a, b) => b.sortAt - a.sortAt);
 
-  return { byTaskId, claimedNos, knownTaskNos, yourTasks, lockedTasks, finished };
+  return {
+    byTaskId,
+    prereqStats,
+    knownTaskNos,
+    claimedNos,
+    yourTasks,
+    lockedTasks,
+    finished,
+  };
 }
 
 export function TaskList({
   tasks: rawTasks,
   userTasks,
   isChild,
+  subjectUserId,
   sessionLogs = [],
   onChanged,
 }: TaskListProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [addComposerActive, setAddComposerActive] = useState(false);
   const [celebratingIds, setCelebratingIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -356,7 +543,7 @@ export function TaskList({
   }
 
   const tasks = useMemo(() => enrichTasks(rawTasks), [rawTasks]);
-  const { byTaskId, claimedNos, knownTaskNos, yourTasks, lockedTasks, finished } =
+  const { byTaskId, prereqStats, knownTaskNos, yourTasks, lockedTasks, finished } =
     partitionTasks(
       tasks,
       userTasks,
@@ -458,11 +645,12 @@ export function TaskList({
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
         alert(data.error || "Update failed");
-        return;
+        return false;
       }
       await onChanged?.();
       const childId = userTask?.user_id;
       if (childId) void notifyFamilySync(childId, "tasks");
+      return true;
     } finally {
       setBusyId(null);
     }
@@ -537,18 +725,64 @@ export function TaskList({
     }
   }
 
-  if (tasks.length === 0) {
+  async function handleCreate(patch: TaskSavePayload) {
+    const childId =
+      subjectUserId ?? userTasks.find((ut) => ut.status !== "removed")?.user_id;
+    if (!childId) {
+      alert("No linked mentee selected.");
+      return false;
+    }
+    setBusyId("__new__");
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          action: "create",
+          child_user_id: childId,
+          task: patch,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        alert(data.error || "Create failed");
+        return false;
+      }
+      await onChanged?.();
+      void notifyFamilySync(childId, "tasks");
+      return true;
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const addTaskBlock = !isChild ? (
+    <AddNewTaskBlock
+      busy={busyId === "__new__"}
+      onCreate={(patch) => handleCreate(patch)}
+      onActiveChange={setAddComposerActive}
+    />
+  ) : null;
+
+  if (tasks.length === 0 && userTasks.length === 0) {
     return (
-      <p className="rounded-2xl bg-warm-bg px-4 py-6 text-center text-sm text-text-muted">
-        {isChild
-          ? "No tasks yet."
-          : "No tasks to show. If the catalog is empty, run supabase/fix_grants_rls_backfill.sql in Supabase."}
-      </p>
+      <div className="space-y-4">
+        {addTaskBlock}
+        {!addComposerActive ? (
+          <p className="rounded-2xl bg-warm-bg px-4 py-6 text-center text-sm text-text-muted">
+            {isChild
+              ? "No tasks yet."
+              : "No tasks to show. If the catalog is empty, run supabase/fix_grants_rls_backfill.sql in Supabase."}
+          </p>
+        ) : null}
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {addTaskBlock}
       <CollapsibleSection
         title="Your Tasks"
         count={yourTasks.length}
@@ -627,7 +861,7 @@ export function TaskList({
                 userTask={byTaskId.get(task.id)}
                 isChild={isChild}
                 locked
-                lockHints={unmetPrereqHints(task, claimedNos, knownTaskNos)}
+                lockHints={unmetPrereqHints(task, prereqStats, knownTaskNos)}
                 busy={busyId === task.id}
                 removing={removing}
                 onRemoveDone={() => finishRemove(task.id)}
