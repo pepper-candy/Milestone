@@ -8,6 +8,7 @@ import {
   CloseIcon,
   FootprintsIcon,
   GemIcon,
+  ImportIcon,
   LockIcon,
   MicIcon,
   PencilIcon,
@@ -2731,14 +2732,14 @@ export function TaskCard({
                         className="absolute top-1/2 right-1 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full transition enabled:hover:bg-[rgba(200,146,42,0.12)] disabled:cursor-default"
                         onClick={() => loadCatalogIntoDraft()}
                       >
-                        <SpinnerIcon
-                          size={14}
-                          className={
-                            catalogLookupLoading
-                              ? "text-gold"
-                              : "text-[rgba(200,146,42,0.85)]"
-                          }
-                        />
+                        {catalogLookupLoading ? (
+                          <SpinnerIcon size={14} className="text-gold" />
+                        ) : (
+                          <ImportIcon
+                            size={14}
+                            className="text-[rgba(200,146,42,0.85)]"
+                          />
+                        )}
                       </button>
                     ) : null}
                   </div>
