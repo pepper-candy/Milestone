@@ -4,22 +4,22 @@ overview: Move prize paths from a global milestones table to per-mentee paths (e
 todos:
   - id: sql-data-model
     content: Add mentee_milestones (+ mentor default template storage); migrate/deprecate global-only reads; RLS for parent/child access
-    status: pending
+    status: completed
   - id: system-template
     content: Encode accumulative_reward.csv as system default prize template (seed or src/data) for Import-when-empty
-    status: pending
+    status: completed
   - id: api-crud
     content: Milestone path GET/PUT for selected mentee; Apply-to-all + persist mentor default; wire Import AND empty-path seed
-    status: pending
+    status: completed
   - id: editor-ui
     content: Prize path sheet/editor; entry from EXP chip + MilestonePath card; Save vs Apply to all mentees
-    status: pending
+    status: completed
   - id: dashboard-wire
     content: Dashboard loads per-mentee path (empty-safe labels); parent vs child permissions
-    status: pending
+    status: completed
   - id: future-mentees
     content: On new mentee create / first dashboard, copy mentor default template if set
-    status: pending
+    status: completed
 isProject: false
 ---
 

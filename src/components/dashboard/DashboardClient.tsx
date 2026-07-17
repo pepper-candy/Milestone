@@ -1,6 +1,7 @@
 "use client";
 
 import { MilestonePath } from "@/components/progress/MilestonePath";
+import { PrizePathEditor } from "@/components/progress/PrizePathEditor";
 import { TaskList } from "@/components/tasks/TaskList";
 import { SessionTimer } from "@/components/timer/SessionTimer";
 import { BoltIcon, GemIcon, SpinnerIcon } from "@/components/ui/Icons";
@@ -81,6 +82,8 @@ export function DashboardClient({
   const [headerMeasured, setHeaderMeasured] = useState(false);
   const [quote, setQuote] = useState(dailyQuote);
   const [quoteSpinning, setQuoteSpinning] = useState(false);
+  const [pathMilestones, setPathMilestones] = useState(milestones);
+  const [prizeEditorOpen, setPrizeEditorOpen] = useState(false);
 
   const dragging = useRef(false);
   const didDrag = useRef(false);
@@ -145,6 +148,10 @@ export function DashboardClient({
     setQuote(dailyQuote);
   }, [dailyQuote]);
 
+  useEffect(() => {
+    setPathMilestones(milestones);
+  }, [milestones]);
+
   function spinQuote() {
     if (quoteSpinning) return;
     setQuoteSpinning(true);
@@ -170,7 +177,7 @@ export function DashboardClient({
     const ro = new ResizeObserver(measure);
     ro.observe(inner);
     return () => ro.disconnect();
-  }, [milestones, gems, quote.quote]);
+  }, [pathMilestones, gems, quote.quote]);
 
   useLayoutEffect(() => {
     const el = headerRef.current;
@@ -242,6 +249,19 @@ export function DashboardClient({
     };
   }, []);
 
+  async function refreshMilestones() {
+    const subject = subjectIds[0];
+    const qs = subject ? `?user_id=${encodeURIComponent(subject)}` : "";
+    try {
+      const res = await fetch(`/api/milestones${qs}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { milestones?: Milestone[] };
+      if (data.milestones) setPathMilestones(data.milestones);
+    } catch {
+      // keep current
+    }
+  }
+
   async function refreshTasks() {
     const res = await fetch("/api/tasks");
     if (!res.ok) return;
@@ -253,6 +273,7 @@ export function DashboardClient({
     // not only user_tasks, or Your Tasks stays empty (ids won't match).
     if (data.tasks) setTasks(data.tasks);
     setUserTasks(data.userTasks ?? []);
+    await refreshMilestones();
     router.refresh();
   }
 
@@ -387,9 +408,11 @@ export function DashboardClient({
             </p>
           </Link>
 
-          <div
-            className="flex shrink-0 items-center gap-1.5 rounded-full border border-[rgba(200,146,42,0.2)] bg-[rgba(252,221,166,0.4)] py-1.5 pl-2.5 pr-2.5"
-            aria-label="Your EXP and gems"
+          <button
+            type="button"
+            onClick={() => setPrizeEditorOpen(true)}
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-[rgba(200,146,42,0.2)] bg-[rgba(252,221,166,0.4)] py-1.5 pl-2.5 pr-2.5 transition active:brightness-95"
+            aria-label="Your EXP and gems — open prize path"
           >
             <span className="flex items-center gap-1 text-xs font-semibold text-gold">
               <BoltIcon size={14} />
@@ -402,7 +425,7 @@ export function DashboardClient({
               <GemIcon size={14} />
               {gems}
             </span>
-          </div>
+          </button>
         </div>
 
         {/* Only this panel height + opacity follow the swipe */}
@@ -416,18 +439,19 @@ export function DashboardClient({
         >
           <div ref={progressInnerRef} className="px-4 pb-2">
             <MilestonePath
-              milestones={milestones}
+              milestones={pathMilestones}
               currentGems={gems}
               compact
+              onOpenEditor={() => setPrizeEditorOpen(true)}
             />
             <button
               type="button"
               onClick={spinQuote}
               disabled={quoteSpinning}
               aria-label="Show another quote"
-              className="mt-2 w-full rounded-2xl border border-[rgba(200,146,42,0.16)] bg-[rgba(255,250,242,0.92)] px-3.5 py-3 text-left shadow-[inset_0px_1px_4px_0px_rgba(0,0,0,0.03)] transition enabled:active:scale-[0.99] disabled:cursor-wait"
+              className="mt-2 w-full rounded-2xl border border-[rgba(200,146,42,0.16)] bg-[rgba(255,250,242,0.92)] px-2.5 py-3 text-left shadow-[inset_0px_1px_4px_0px_rgba(0,0,0,0.03)] transition enabled:active:scale-[0.99] disabled:cursor-wait"
             >
-              <div className="flex gap-2.5">
+              <div className="flex gap-2">
                 <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center text-gold">
                   {quoteSpinning ? (
                     <SpinnerIcon size={18} className="text-gold" />
@@ -533,6 +557,18 @@ export function DashboardClient({
         active={active}
         onActiveChange={setActive}
         subjectIds={subjectIds}
+      />
+
+      <PrizePathEditor
+        open={prizeEditorOpen}
+        onClose={() => setPrizeEditorOpen(false)}
+        canEdit={!profile.is_child}
+        menteeUserId={subjectIds[0] ?? null}
+        milestones={pathMilestones}
+        onSaved={(next) => {
+          setPathMilestones(next);
+          router.refresh();
+        }}
       />
     </div>
   );

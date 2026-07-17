@@ -5,6 +5,7 @@ import {
   sampleTemplateEntries,
   sharedFieldsFromCatalogEntry,
 } from "@/lib/import-sample-template";
+import { seedSystemPrizePathIfEmpty } from "@/lib/prize-path";
 import {
   ensureTasksForViewer,
   fetchViewerUserTasks,
@@ -623,10 +624,20 @@ export async function POST(request: Request) {
       createdCount += 1;
     }
 
+    // Also seed the system prize template when this mentee's path is empty.
+    const prizeSeed = await seedSystemPrizePathIfEmpty(writeClient, childUserId);
+    if (prizeSeed.error) {
+      console.warn(
+        "[import_template] prize path seed skipped:",
+        prizeSeed.error,
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       created: createdCount,
       catalogSeeded,
+      prizesSeeded: prizeSeed.seeded,
     });
   }
 

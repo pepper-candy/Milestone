@@ -1,0 +1,72 @@
+[
+  {
+    "gem_threshold": 15,
+    "title": "Satisfactory",
+    "prize_name": "Spotify Premium (1 Months)",
+    "prize_description": "1 month Spotify Premium",
+    "icon": "🎵"
+  },
+  {
+    "gem_threshold": 21,
+    "title": "Good",
+    "prize_name": "Meccha Chemeleon",
+    "prize_description": "Meccha Chameleon prize",
+    "icon": "🦎"
+  },
+  {
+    "gem_threshold": 23,
+    "title": "Great",
+    "prize_name": "Volleyball Stuff",
+    "prize_description": "Volleyball gear",
+    "icon": "🏐"
+  },
+  {
+    "gem_threshold": 24,
+    "title": "Great+",
+    "prize_name": "Spotify Premium (3 Months)",
+    "prize_description": "3 months Spotify Premium",
+    "icon": "🎧"
+  },
+  {
+    "gem_threshold": 26,
+    "title": "Excellent",
+    "prize_name": "Cow Angry (牛氣)",
+    "prize_description": "牛氣放題",
+    "icon": "🍜"
+  },
+  {
+    "gem_threshold": 28,
+    "title": "Excellent+",
+    "prize_name": "Apple Pencil",
+    "prize_description": "Apple Pencil",
+    "icon": "✏️"
+  },
+  {
+    "gem_threshold": 29,
+    "title": "Superb",
+    "prize_name": "Spotify Premium (5 Months)",
+    "prize_description": "5 months Spotify Premium",
+    "icon": "🎶"
+  },
+  {
+    "gem_threshold": 31,
+    "title": "Superb+",
+    "prize_name": "Airpods (Any Model)",
+    "prize_description": "AirPods any model",
+    "icon": "👂"
+  },
+  {
+    "gem_threshold": 33,
+    "title": "Outstanding",
+    "prize_name": "Spotify Premium (11 Months)",
+    "prize_description": "11 months Spotify Premium",
+    "icon": "👑"
+  },
+  {
+    "gem_threshold": 40,
+    "title": "Cap",
+    "prize_name": "Hidden Bonus",
+    "prize_description": "Hidden end-of-path bonus",
+    "icon": "🏰"
+  }
+]

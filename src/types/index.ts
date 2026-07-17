@@ -24,6 +24,8 @@ export interface Profile {
   selected_child_code?: string | null;
   /** EXP already spent into gems via Convert (multiples of 20). */
   converted_exp?: number;
+  /** Mentor default prize path stops (JSON); copied to new mentees. */
+  prize_path_default?: unknown;
   created_at: string;
 }
 

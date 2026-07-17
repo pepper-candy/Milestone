@@ -837,6 +837,7 @@ export function TaskList({
       }
       await onChanged?.();
       void notifyFamilySync(childId, "tasks");
+      void notifyFamilySync(childId, "dashboard");
     } catch {
       setImportError("Import failed. Check your connection and try again.");
     } finally {

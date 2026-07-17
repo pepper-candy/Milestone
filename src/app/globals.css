@@ -74,6 +74,42 @@ body {
   }
 }
 
+@keyframes sheet-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes sheet-slide-down {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes backdrop-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes backdrop-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 @keyframes swipe-fade-in {
   from {
     opacity: 0;
@@ -124,4 +160,20 @@ body {
 
 .animate-slide-in-up {
   animation: slide-in-up 0.55s ease-out both;
+}
+
+.animate-sheet-slide-up {
+  animation: sheet-slide-up 0.38s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.animate-sheet-slide-down {
+  animation: sheet-slide-down 0.32s cubic-bezier(0.4, 0, 0.68, 0.28) both;
+}
+
+.animate-backdrop-fade-in {
+  animation: backdrop-fade-in 0.28s ease-out both;
+}
+
+.animate-backdrop-fade-out {
+  animation: backdrop-fade-out 0.28s ease-in both;
 }

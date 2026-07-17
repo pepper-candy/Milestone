@@ -2,6 +2,7 @@ import { DashboardClient } from "@/components/dashboard/DashboardClient";
 import { hasNickname } from "@/lib/auth";
 import { getDailyQuote } from "@/lib/daily-quote";
 import { toUtcIso } from "@/lib/datetime";
+import { menteeRowsToMilestones } from "@/lib/prize-path";
 import { createClient } from "@/lib/supabase/server";
 import { enrichTasks } from "@/lib/task-catalog";
 import {
@@ -75,14 +76,20 @@ export default async function DashboardPage() {
   const [
     { data: tasks, error: tasksError },
     { data: userTasks },
-    { data: milestones, error: milestonesError },
+    { data: menteeMilestoneRows, error: milestonesError },
     { data: openSession },
     { data: endedSessions },
     { data: subjectProfile },
   ] = await Promise.all([
     supabase.from("tasks").select("*").order("seq"),
     fetchViewerUserTasks(supabase, subjectIds),
-    supabase.from("milestones").select("*").order("gem_threshold"),
+    sessionSubjectId
+      ? supabase
+          .from("mentee_milestones")
+          .select("*")
+          .eq("user_id", sessionSubjectId)
+          .order("gem_threshold")
+      : Promise.resolve({ data: [], error: null }),
     openSessionQuery,
     sessionsQuery,
     sessionSubjectId
@@ -93,6 +100,8 @@ export default async function DashboardPage() {
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
   ]);
+
+  const milestones = menteeRowsToMilestones(menteeMilestoneRows ?? []);
 
   const active: ActiveSessionState | null = openSession
     ? {
@@ -118,10 +127,17 @@ export default async function DashboardPage() {
   const sessionExp = sessionLogs.reduce((sum, s) => sum + s.exp_earned, 0);
 
   const catalogEmpty = !tasksError && (tasks?.length ?? 0) === 0;
+  const milestonesHint =
+    milestonesError?.message &&
+    /mentee_milestones|does not exist|schema cache/i.test(milestonesError.message)
+      ? " Prize paths need ref/supabase/migrate_mentee_prize_paths.sql in Supabase."
+      : milestonesError?.message
+        ? ` ${milestonesError.message}`
+        : "";
   const tasksWarning =
     ensureResult.error ||
     tasksError?.message ||
-    milestonesError?.message ||
+    (milestonesHint ? milestonesHint.trim() : undefined) ||
     (catalogEmpty
       ? "Task catalog is blocked or empty. Run supabase/fix_grants_rls_backfill.sql in Supabase."
       : undefined);
@@ -140,7 +156,7 @@ export default async function DashboardPage() {
       profile={typedProfile}
       tasks={enrichTasks(tasks ?? [])}
       userTasks={userTasks ?? []}
-      milestones={milestones ?? []}
+      milestones={milestones}
       initialActive={active}
       sessionExp={sessionExp}
       sessionLogs={sessionLogs}

@@ -5,6 +5,7 @@ import {
   normalizeInviteCodeInput,
   suggestAvailableInviteCode,
 } from "@/lib/invitation-code";
+import { copyMentorDefaultPrizePath } from "@/lib/prize-path";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -195,6 +196,18 @@ export async function POST(request: Request) {
         .update({ linked_children: nextChildren })
         .eq("id", parent.userId);
       // Mentees start with an empty task list (no bulk catalog seed).
+      // Copy mentor default prize path if set.
+      const prizeCopy = await copyMentorDefaultPrizePath(
+        admin,
+        parent.userId,
+        newUserId,
+      );
+      if (prizeCopy.error) {
+        console.warn(
+          "[invite] prize path default copy skipped:",
+          prizeCopy.error,
+        );
+      }
     } else {
       for (const childCode of inviterChildren) {
         const { data: childProfile } = await admin

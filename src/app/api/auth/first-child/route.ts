@@ -4,6 +4,7 @@ import {
   normalizeInviteCodeInput,
   suggestAvailableInviteCode,
 } from "@/lib/invitation-code";
+import { copyMentorDefaultPrizePath } from "@/lib/prize-path";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
@@ -125,11 +126,25 @@ export async function POST() {
       return NextResponse.json({ error: linkError.message }, { status: 500 });
     }
 
+    // Copy mentor default prize path if set (else leave empty).
+    const prizeCopy = await copyMentorDefaultPrizePath(
+      admin,
+      user.id,
+      newUserId,
+    );
+    if (prizeCopy.error) {
+      console.warn(
+        "[first-child] prize path default copy skipped:",
+        prizeCopy.error,
+      );
+    }
+
     return NextResponse.json({
       ok: true,
       parentCode,
       childCode,
       created: true,
+      prizePathCopied: prizeCopy.copied,
     });
   } catch (err) {
     const message =
