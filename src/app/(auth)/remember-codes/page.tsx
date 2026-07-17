@@ -81,7 +81,7 @@ export default function RememberCodesPage() {
 
   async function copyMenteeInvitation() {
     const normalized = childCode.trim().toUpperCase();
-    const text = `Join me on Milestone (https://my-stone.vercel.app) as my mentee. Invitation code: ${normalized}`;
+    const text = `Join me on Milestone as my mentee.\nInvitation code: ${normalized}\non Milestone: https://my-stone.vercel.app`;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
