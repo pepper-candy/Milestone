@@ -27,6 +27,15 @@ export default async function DashboardPage() {
   if (!hasNickname(profile?.nickname)) redirect("/setup");
 
   const typedProfile = profile as Profile;
+
+  // Parents need at least one linked mentee before using the dashboard.
+  if (
+    !typedProfile.is_child &&
+    !(typedProfile.linked_children ?? []).filter(Boolean).length
+  ) {
+    redirect("/remember-codes");
+  }
+
   const ensureResult = await ensureTasksForViewer(supabase, typedProfile);
 
   const serverNow = new Date().toISOString();
@@ -69,12 +78,20 @@ export default async function DashboardPage() {
     { data: milestones, error: milestonesError },
     { data: openSession },
     { data: endedSessions },
+    { data: subjectProfile },
   ] = await Promise.all([
     supabase.from("tasks").select("*").order("seq"),
     fetchViewerUserTasks(supabase, subjectIds),
     supabase.from("milestones").select("*").order("gem_threshold"),
     openSessionQuery,
     sessionsQuery,
+    sessionSubjectId
+      ? supabase
+          .from("profiles")
+          .select("nickname, invitation_code")
+          .eq("id", sessionSubjectId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ]);
 
   const active: ActiveSessionState | null = openSession
@@ -109,6 +126,14 @@ export default async function DashboardPage() {
       ? "Task catalog is blocked or empty. Run supabase/fix_grants_rls_backfill.sql in Supabase."
       : undefined);
   const dailyQuote = getDailyQuote();
+  const subjectNickname =
+    !typedProfile.is_child
+      ? ((subjectProfile?.nickname as string | null) ?? null)
+      : null;
+  const subjectInviteCode =
+    !typedProfile.is_child
+      ? ((subjectProfile?.invitation_code as string | null) ?? null)
+      : null;
 
   return (
     <DashboardClient
@@ -120,6 +145,8 @@ export default async function DashboardPage() {
       sessionExp={sessionExp}
       sessionLogs={sessionLogs}
       subjectIds={subjectIds}
+      subjectNickname={subjectNickname}
+      subjectInviteCode={subjectInviteCode}
       tasksWarning={tasksWarning}
       dailyQuote={dailyQuote}
     />

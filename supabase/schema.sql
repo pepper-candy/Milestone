@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  task_no TEXT UNIQUE NOT NULL,
+  -- task_no may repeat across mentee instances; catalog templates are unique
+  -- (see migrate_mentee_task_instances.sql).
+  task_no TEXT NOT NULL,
   category TEXT NOT NULL,
   exp INTEGER NOT NULL,
   gem INTEGER NOT NULL DEFAULT 0,
@@ -38,6 +40,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   is_catalog_template BOOLEAN NOT NULL DEFAULT true,
   prereqs TEXT[]
 );
+
+-- Shared catalog templates: one row per task_no (case-insensitive).
+CREATE UNIQUE INDEX IF NOT EXISTS tasks_catalog_task_no_unique
+  ON tasks (lower(task_no))
+  WHERE is_catalog_template = true;
 
 CREATE TABLE IF NOT EXISTS user_tasks (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -174,6 +181,12 @@ CREATE POLICY "Parents read child tasks" ON user_tasks
 DROP POLICY IF EXISTS "Parents update child tasks" ON user_tasks;
 CREATE POLICY "Parents update child tasks" ON user_tasks
   FOR UPDATE TO authenticated USING (
+    EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.is_child = false)
+  );
+DROP POLICY IF EXISTS "Parents insert child tasks" ON user_tasks;
+CREATE POLICY "Parents insert child tasks" ON user_tasks
+  FOR INSERT TO authenticated
+  WITH CHECK (
     EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.is_child = false)
   );
 

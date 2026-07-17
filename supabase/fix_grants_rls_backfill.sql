@@ -59,13 +59,10 @@ CREATE POLICY "Parents update child tasks" ON user_tasks
     EXISTS (SELECT 1 FROM profiles p WHERE p.id = auth.uid() AND p.is_child = false)
   );
 
--- 4) Assign every catalog task to every child (safe to re-run)
--- IMPORTANT: always 'available' (unchecked). Never use 'pending' here —
--- pending means "already submitted for mentor review" and makes new mentees
--- look pre-checked. ON CONFLICT DO NOTHING will not overwrite existing rows.
-INSERT INTO user_tasks (user_id, task_id, status)
-SELECT p.id, t.id, 'available'
-FROM profiles p
-CROSS JOIN tasks t
-WHERE p.is_child = true
-ON CONFLICT (user_id, task_id) DO NOTHING;
+-- 4) Do NOT auto-assign catalog tasks to mentees.
+-- New mentees start with an empty Your Tasks list.
+-- Parents load the sample list via "Import Task from Sample Template".
+--
+-- IMPORTANT: Also drop trigger_auto_create_child_tasks on profiles if it exists
+-- in your project (see supabase/drop_auto_create_child_tasks_trigger.sql).
+-- That live trigger re-seeds 23 tasks on every new child profile insert.

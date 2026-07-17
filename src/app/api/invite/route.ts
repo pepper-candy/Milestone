@@ -7,7 +7,6 @@ import {
 } from "@/lib/invitation-code";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { ensureUserTasks } from "@/lib/user-tasks";
 import { NextResponse } from "next/server";
 
 type InviteRole = "mentee" | "mentor";
@@ -195,13 +194,7 @@ export async function POST(request: Request) {
         .from("profiles")
         .update({ linked_children: nextChildren })
         .eq("id", parent.userId);
-
-      // Seed catalog as available (unchecked) — never pending.
-      // Admin client bypasses RLS so rows exist before the mentee logs in.
-      const seed = await ensureUserTasks(admin, newUserId);
-      if (seed.error) {
-        console.warn("Invite task seed warning:", seed.error);
-      }
+      // Mentees start with an empty task list (no bulk catalog seed).
     } else {
       for (const childCode of inviterChildren) {
         const { data: childProfile } = await admin

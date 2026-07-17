@@ -1,11 +1,22 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { hasNickname, invitationToEmail, normalizeInvitationCode } from "@/lib/auth";
+import {
+  isInviteCodeAvailable,
+  isInviteCodeFormatValid,
+  normalizeInviteCodeInput,
+} from "@/lib/invitation-code";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { code?: string };
-    const code = normalizeInvitationCode(body.code ?? "");
+    const body = (await request.json()) as {
+      code?: string;
+      createMentor?: boolean;
+    };
+    const code = normalizeInviteCodeInput(
+      normalizeInvitationCode(body.code ?? ""),
+    );
     if (!code) {
       return NextResponse.json(
         { error: "Please enter your invitation code first." },
@@ -13,9 +24,82 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!isInviteCodeFormatValid(code)) {
+      return NextResponse.json(
+        { error: "Use 5 letters or numbers" },
+        { status: 400 },
+      );
+    }
+
     const email = invitationToEmail(code);
     const password = code;
     const supabase = await createClient();
+
+    // Public mentor onboarding: provision parent for an unused code, then sign in.
+    if (body.createMentor === true) {
+      const available = await isInviteCodeAvailable(supabase, code);
+      if (!available) {
+        return NextResponse.json(
+          { error: "This code is already used. Try Start as a Mentor again." },
+          { status: 409 },
+        );
+      }
+
+      let admin;
+      try {
+        admin = createAdminClient();
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Mentor signup unavailable";
+        return NextResponse.json({ error: message }, { status: 503 });
+      }
+
+      const { data: created, error: createError } =
+        await admin.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: {
+            invitation_code: code,
+            is_child: false,
+            linked_parents: [],
+            linked_children: [],
+            nickname: "",
+          },
+        });
+
+      if (createError || !created.user) {
+        const msg = createError?.message?.toLowerCase() ?? "";
+        if (msg.includes("already") || msg.includes("registered")) {
+          return NextResponse.json(
+            { error: "This code is already used. Try Start as a Mentor again." },
+            { status: 409 },
+          );
+        }
+        return NextResponse.json(
+          { error: createError?.message || "Could not create mentor account" },
+          { status: 500 },
+        );
+      }
+
+      const { error: profileError } = await admin.from("profiles").insert({
+        id: created.user.id,
+        invitation_code: code,
+        nickname: null,
+        avatar_url: null,
+        is_child: false,
+        linked_parents: [],
+        linked_children: [],
+      });
+
+      if (profileError) {
+        await admin.auth.admin.deleteUser(created.user.id);
+        return NextResponse.json(
+          { error: profileError.message },
+          { status: 500 },
+        );
+      }
+    }
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -64,10 +148,18 @@ export async function POST(request: Request) {
       });
     }
 
+    const isChild = (existing?.is_child as boolean | undefined) ?? (meta.is_child as boolean | undefined) ?? true;
+    const linkedChildren =
+      ((existing?.linked_children as string[] | null | undefined) ??
+        (meta.linked_children as string[] | undefined) ??
+        []).filter(Boolean);
+
     return NextResponse.json({
       ok: true,
       nickname: hasNickname(nickname) ? nickname : null,
       needsSetup: !hasNickname(nickname),
+      isChild,
+      needsFirstChild: !isChild && linkedChildren.length === 0,
     });
   } catch {
     return NextResponse.json({ error: "Login failed" }, { status: 500 });

@@ -8,8 +8,6 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-type LinkedChild = { invitation_code: string; nickname: string | null };
-
 export default function SetupPage() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -20,8 +18,6 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(false);
   const [welcome, setWelcome] = useState(false);
   const [isChild, setIsChild] = useState(true);
-  const [linkedChildren, setLinkedChildren] = useState<LinkedChild[]>([]);
-  const [showParentContinue, setShowParentContinue] = useState(false);
 
   useEffect(() => {
     async function guard() {
@@ -40,7 +36,17 @@ export default function SetupPage() {
         .maybeSingle();
 
       if (profile?.nickname && profile.nickname.trim()) {
-        router.replace("/dashboard");
+        const childFlag =
+          profile?.is_child ??
+          (user.user_metadata?.is_child as boolean | undefined) ??
+          true;
+        const linked =
+          (profile?.linked_children as string[] | undefined) ?? [];
+        if (!childFlag && linked.length === 0) {
+          router.replace("/remember-codes");
+        } else {
+          router.replace("/dashboard");
+        }
         return;
       }
 
@@ -49,19 +55,6 @@ export default function SetupPage() {
         (user.user_metadata?.is_child as boolean | undefined) ??
         true;
       setIsChild(childFlag);
-
-      const linked =
-        (profile?.linked_children as string[] | undefined) ??
-        (user.user_metadata?.linked_children as string[] | undefined) ??
-        [];
-
-      if (!childFlag && linked.length) {
-        const { data: kids } = await supabase
-          .from("profiles")
-          .select("invitation_code, nickname")
-          .in("invitation_code", linked);
-        setLinkedChildren(kids ?? []);
-      }
     }
     void guard();
   }, [router]);
@@ -132,7 +125,14 @@ export default function SetupPage() {
       await new Promise((r) => setTimeout(r, 800));
 
       if (!isChild) {
-        setShowParentContinue(true);
+        // Create first mentee (whether or not Copy is pressed later) then show codes.
+        try {
+          await fetch("/api/auth/first-child", { method: "POST" });
+        } catch {
+          // remember-codes page will retry
+        }
+        router.replace("/remember-codes");
+        router.refresh();
       } else {
         router.replace("/dashboard");
         router.refresh();
@@ -140,55 +140,6 @@ export default function SetupPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  if (showParentContinue) {
-    return (
-      <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-warm-bg px-4 py-10">
-        <CozyBackground />
-        <div className="animate-slide-in-up relative z-10 w-full max-w-[440px] rounded-3xl bg-[rgba(253,246,236,0.7)] px-8 py-12 text-center shadow-[0px_8px_48px_0px_rgba(200,146,42,0.08)]">
-          <h1 className="text-2xl font-semibold text-ink">Welcome, parent</h1>
-          <p className="mt-2 text-sm text-[rgba(28,22,16,0.65)]">
-            Your linked children
-          </p>
-          <ul className="mt-6 space-y-3 text-left">
-            {linkedChildren.length === 0 ? (
-              <li className="rounded-2xl bg-surface px-4 py-3 text-sm text-text-muted">
-                No linked children found yet.
-              </li>
-            ) : (
-              linkedChildren.map((c) => (
-                <li
-                  key={c.invitation_code}
-                  className="rounded-2xl bg-surface px-4 py-3"
-                >
-                  <p className="font-semibold text-ink">
-                    {c.nickname || "Not set up yet"}
-                  </p>
-                  <p className="text-xs uppercase tracking-wider text-gold">
-                    {c.invitation_code}
-                  </p>
-                </li>
-              ))
-            )}
-          </ul>
-          <button
-            type="button"
-            onClick={() => {
-              router.replace("/dashboard");
-              router.refresh();
-            }}
-            className="mt-8 w-full rounded-full px-6 py-4 text-sm font-semibold uppercase tracking-[1.96px] text-[#fffaf2] shadow-[0px_4px_8px_rgba(200,146,42,0.3)]"
-            style={{
-              backgroundImage:
-                "linear-gradient(173deg, rgb(252, 221, 166) 0%, rgb(200, 146, 42) 100%)",
-            }}
-          >
-            Continue
-          </button>
-        </div>
-      </main>
-    );
   }
 
   return (

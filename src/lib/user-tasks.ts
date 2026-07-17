@@ -12,79 +12,15 @@ function formatSupabaseError(error: {
 }
 
 /**
- * Backfill user_tasks for one user (only rows they are missing).
- * RLS only allows inserting rows where user_id = auth.uid(), so this must run
- * while that user is logged in (or via SQL as a privileged role).
+ * New mentees start with an empty list — no bulk seed from the shared catalog.
+ * Parents assign tasks via create / Import Sample Template.
+ * Kept as a no-op so older call sites stay safe if any remain.
  */
 export async function ensureUserTasks(
-  supabase: SupabaseClient,
-  userId: string,
+  _supabase: SupabaseClient,
+  _userId: string,
 ): Promise<{ created: number; error?: string }> {
-  const { data: existing, error: existingError } = await supabase
-    .from("user_tasks")
-    .select("task_id")
-    .eq("user_id", userId);
-
-  if (existingError) {
-    console.warn(
-      "Error checking user tasks:",
-      formatSupabaseError(existingError),
-    );
-    return { created: 0, error: formatSupabaseError(existingError) };
-  }
-
-  const { data: allTasks, error: tasksError } = await supabase
-    .from("tasks")
-    .select("id");
-
-  if (tasksError) {
-    console.warn("Error fetching tasks:", formatSupabaseError(tasksError));
-    return { created: 0, error: formatSupabaseError(tasksError) };
-  }
-
-  if (!allTasks || allTasks.length === 0) {
-    console.warn(
-      "⚠️ tasks table empty or unreadable — run supabase/fix_grants_rls_backfill.sql",
-    );
-    return {
-      created: 0,
-      error:
-        "Task catalog is empty or blocked by database permissions. Run supabase/fix_grants_rls_backfill.sql in the Supabase SQL editor.",
-    };
-  }
-
-  const have = new Set((existing ?? []).map((row) => row.task_id as string));
-  const missing = allTasks.filter((task) => !have.has(task.id));
-
-  if (missing.length === 0) {
-    return { created: 0 };
-  }
-
-  console.log(
-    `🔧 Creating ${missing.length} missing user_tasks for ${userId}…`,
-  );
-
-  const rows = missing.map((task) => ({
-    user_id: userId,
-    task_id: task.id,
-    // Unchecked / not submitted. "pending" = mentee already asked for review.
-    status: "available" as const,
-  }));
-
-  const { error: insertError } = await supabase
-    .from("user_tasks")
-    .insert(rows);
-
-  if (insertError) {
-    console.warn(
-      "Error creating user tasks:",
-      formatSupabaseError(insertError),
-    );
-    return { created: 0, error: formatSupabaseError(insertError) };
-  }
-
-  console.log(`✅ Created ${rows.length} tasks for user`);
-  return { created: rows.length };
+  return { created: 0 };
 }
 
 /** Resolve parent linked_children invitation codes → profile UUIDs. */
@@ -155,9 +91,8 @@ export async function resolvePrimaryChildId(
 }
 
 /**
- * Children: ensure own user_tasks.
- * Parents: do not create personal tasks — assign/backfill happens for children
- * (via child login or SQL). Returns child profile ids for parents.
+ * Resolve whose tasks to load. Does not seed assignments — mentees start blank.
+ * Children: own id. Parents: selected (or first) linked child.
  */
 export async function ensureTasksForViewer(
   supabase: SupabaseClient,
@@ -169,12 +104,7 @@ export async function ensureTasksForViewer(
   },
 ): Promise<{ created: number; error?: string; subjectUserIds: string[] }> {
   if (profile.is_child) {
-    const result = await ensureUserTasks(supabase, profile.id);
-    return {
-      created: result.created,
-      error: result.error,
-      subjectUserIds: [profile.id],
-    };
+    return { created: 0, subjectUserIds: [profile.id] };
   }
 
   const childId = await resolveSelectedChildId(supabase, profile);

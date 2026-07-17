@@ -30,7 +30,10 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isAuthPage = path.startsWith("/login") || path.startsWith("/setup");
+  const isAuthPage =
+    path.startsWith("/login") ||
+    path.startsWith("/setup") ||
+    path.startsWith("/remember-codes");
   const isPublicAsset =
     path.startsWith("/brand") ||
     path === "/favicon.ico" ||

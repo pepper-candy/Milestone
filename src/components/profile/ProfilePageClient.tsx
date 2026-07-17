@@ -240,12 +240,11 @@ export function ProfilePageClient() {
         {isParent ? (
           <section className="flex flex-col gap-1.5">
             <h2 className="text-sm font-semibold uppercase tracking-[1.2px] text-[rgba(28,22,16,0.55)]">
-              Your mentees
+              Your mentees ({data.linkedMentees.length})
             </h2>
             {data.linkedMentees.length === 0 ? (
               <p className="rounded-2xl bg-surface px-4 py-4 text-sm text-[rgba(28,22,16,0.55)]">
-                No linked mentees yet. Share your invitation code so they can
-                join.
+                Link up a mentee below.
               </p>
             ) : (
               <ul className="space-y-3">
@@ -287,12 +286,12 @@ export function ProfilePageClient() {
 
         <section className="flex flex-col gap-1.5">
           <h2 className="text-sm font-semibold uppercase tracking-[1.2px] text-[rgba(28,22,16,0.55)]">
-            Linked mentors
+            Linked mentors ({data.linkedMentors.length})
           </h2>
           {data.linkedMentors.length === 0 ? (
             <p className="rounded-2xl bg-surface px-4 py-4 text-sm text-[rgba(28,22,16,0.55)]">
               {isParent
-                ? "No linked mentors yet. Invite a co-mentor below."
+                ? "Invite a co-mentor below."
                 : "No linked mentors yet."}
             </p>
           ) : (

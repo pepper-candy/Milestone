@@ -1,8 +1,10 @@
 -- Fix: POST /api/tasks update → 42501 permission denied for table tasks
 -- Run in Supabase SQL Editor, then retry Save.
+-- For Import / create also run fix_tasks_service_role_grants.sql (service_role GRANTs).
 
-GRANT USAGE ON SCHEMA public TO authenticated, anon;
+GRANT USAGE ON SCHEMA public TO authenticated, anon, service_role;
 GRANT SELECT, INSERT, UPDATE ON TABLE tasks TO authenticated;
+GRANT ALL ON TABLE tasks TO service_role;
 
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 

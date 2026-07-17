@@ -7,7 +7,7 @@ import {
   type TaskCardAction,
   type TaskSavePayload,
 } from "@/components/tasks/TaskCard";
-import { ChevronDownIcon } from "@/components/ui/Icons";
+import { ChevronDownIcon, ImportIcon } from "@/components/ui/Icons";
 import { notifyFamilySync } from "@/lib/family-sync";
 import { enrichTasks } from "@/lib/task-catalog";
 import {
@@ -32,6 +32,10 @@ type TaskListProps = {
   isChild: boolean;
   /** Mentee user id when parent is viewing a linked child. */
   subjectUserId?: string | null;
+  /** Selected mentee nickname (parent view). */
+  subjectNickname?: string | null;
+  /** Selected mentee invite code — used when nickname is not set yet. */
+  subjectInviteCode?: string | null;
   sessionLogs?: SessionLogItem[];
   onChanged?: () => void | Promise<void>;
 };
@@ -226,21 +230,27 @@ function AddNewTaskBlock({
 
 function CollapsibleSection({
   title,
+  titleAria,
   count,
   defaultOpen = true,
   children,
   empty,
   emptyMessage = "Nothing here yet.",
+  emptyContent,
   headerEnd,
   contentClassName = "space-y-3",
 }: {
-  title: string;
+  title: ReactNode;
+  /** Plain text for aria labels when title is rich. */
+  titleAria?: string;
   /** Item count shown as TITLE (n). */
   count?: number;
   defaultOpen?: boolean;
   children: ReactNode;
   empty?: boolean;
   emptyMessage?: string;
+  /** Replaces the default empty `<p>` when set (e.g. import CTA). */
+  emptyContent?: ReactNode;
   /** Rendered left of the chevron (e.g. sessions toggle). */
   headerEnd?: ReactNode;
   contentClassName?: string;
@@ -305,6 +315,9 @@ function CollapsibleSection({
     });
   }
 
+  const sectionName =
+    titleAria ?? (typeof title === "string" ? title : "Section");
+
   return (
     <section>
       <div className="mb-3 flex w-full items-center gap-2 px-1">
@@ -325,7 +338,9 @@ function CollapsibleSection({
             type="button"
             className="shrink-0"
             aria-expanded={expanded}
-            aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+            aria-label={
+              expanded ? `Collapse ${sectionName}` : `Expand ${sectionName}`
+            }
             onClick={toggle}
           >
             <ChevronDownIcon
@@ -353,9 +368,11 @@ function CollapsibleSection({
               }}
             >
               {empty ? (
-                <p className="rounded-2xl bg-[rgba(240,232,216,0.5)] px-4 py-5 text-center text-sm text-[#8a7a68]">
-                  {emptyMessage}
-                </p>
+                emptyContent ?? (
+                  <p className="rounded-2xl bg-[rgba(240,232,216,0.5)] px-4 py-5 text-center text-sm text-[#8a7a68]">
+                    {emptyMessage}
+                  </p>
+                )
               ) : (
                 <div className={contentClassName}>{children}</div>
               )}
@@ -463,10 +480,13 @@ export function TaskList({
   userTasks,
   isChild,
   subjectUserId,
+  subjectNickname,
+  subjectInviteCode,
   sessionLogs = [],
   onChanged,
 }: TaskListProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [addComposerActive, setAddComposerActive] = useState(false);
   const [celebratingIds, setCelebratingIds] = useState<Set<string>>(
     () => new Set(),
@@ -757,6 +777,67 @@ export function TaskList({
     }
   }
 
+  async function handleImportTemplate() {
+    const childId =
+      subjectUserId ?? userTasks.find((ut) => ut.status !== "removed")?.user_id;
+    if (!childId) {
+      setImportError("No linked mentee selected.");
+      return;
+    }
+    setImportError(null);
+    setBusyId("__import__");
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          action: "import_template",
+          child_user_id: childId,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        setImportError(data.error || "Import failed");
+        return;
+      }
+      await onChanged?.();
+      void notifyFamilySync(childId, "tasks");
+    } catch {
+      setImportError("Import failed. Check your connection and try again.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const hasActiveAssignments = userTasks.some((ut) => ut.status !== "removed");
+  const showImport = !isChild && !hasActiveAssignments;
+
+  const importEmptyButton = showImport ? (
+    <div className="space-y-2">
+      <div className={ADD_SHELL_CLASS}>
+        <button
+          type="button"
+          aria-label="Import task from sample template"
+          disabled={busyId === "__import__"}
+          onClick={() => void handleImportTemplate()}
+          className="flex w-full items-center justify-center gap-2 px-4 py-2.5 transition hover:bg-[rgba(252,221,166,0.28)] active:brightness-95 disabled:opacity-60"
+          style={{ height: ADD_BUTTON_H }}
+        >
+          <ImportIcon size={14} className="text-gold" />
+          <span className="text-[11px] font-semibold uppercase tracking-[1.4px] text-gold">
+            {busyId === "__import__"
+              ? "Importing…"
+              : "Import Task from Sample Template"}
+          </span>
+        </button>
+      </div>
+      {importError ? (
+        <p className="px-1 text-center text-sm text-red-600">{importError}</p>
+      ) : null}
+    </div>
+  ) : null;
+
   const addTaskBlock = !isChild ? (
     <AddNewTaskBlock
       busy={busyId === "__new__"}
@@ -770,23 +851,40 @@ export function TaskList({
       <div className="space-y-4">
         {addTaskBlock}
         {!addComposerActive ? (
-          <p className="rounded-2xl bg-warm-bg px-4 py-6 text-center text-sm text-text-muted">
-            {isChild
-              ? "No tasks yet."
-              : "No tasks to show. If the catalog is empty, run supabase/fix_grants_rls_backfill.sql in Supabase."}
-          </p>
+          showImport ? (
+            importEmptyButton
+          ) : (
+            <p className="rounded-2xl bg-warm-bg px-4 py-6 text-center text-sm text-text-muted">
+              No tasks yet.
+            </p>
+          )
         ) : null}
       </div>
     );
   }
 
+  const menteeLabel =
+    subjectNickname?.trim() || subjectInviteCode?.trim() || null;
+  const yourTasksTitle = !isChild && menteeLabel ? (
+    <>
+      <span className="font-extrabold text-ink">{menteeLabel}</span>
+      <span className="font-semibold">{" Tasks"}</span>
+    </>
+  ) : (
+    "Your Tasks"
+  );
+  const yourTasksTitleAria =
+    !isChild && menteeLabel ? `${menteeLabel} Tasks` : "Your Tasks";
+
   return (
     <div className="space-y-4">
       {addTaskBlock}
       <CollapsibleSection
-        title="Your Tasks"
+        title={yourTasksTitle}
+        titleAria={yourTasksTitleAria}
         count={yourTasks.length}
         empty={yourTasks.length === 0}
+        emptyContent={importEmptyButton ?? undefined}
       >
         {yourTasks.map((task) => {
           const celebrating = celebratingIds.has(task.id);

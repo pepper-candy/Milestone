@@ -14,6 +14,27 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [welcome, setWelcome] = useState(false);
+  const [createMentor, setCreateMentor] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+
+  async function handleStartAsMentor() {
+    setSuggesting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/mentor-suggest");
+      const data = (await res.json()) as { code?: string; error?: string };
+      if (!res.ok || !data.code) {
+        setError(data.error || "Could not suggest a mentor code");
+        return;
+      }
+      setCode(data.code);
+      setCreateMentor(true);
+    } catch {
+      setError("Could not suggest a mentor code");
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   async function handleLogin() {
     const trimmed = code.trim();
@@ -29,11 +50,15 @@ export default function LoginPage() {
       const res = await fetch("/api/auth", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: trimmed }),
+        body: JSON.stringify({
+          code: trimmed,
+          createMentor: createMentor || undefined,
+        }),
       });
       const data = (await res.json()) as {
         error?: string;
         needsSetup?: boolean;
+        needsFirstChild?: boolean;
         nickname?: string | null;
       };
 
@@ -52,6 +77,8 @@ export default function LoginPage() {
 
       if (data.needsSetup || !hasNickname(data.nickname)) {
         router.replace("/setup");
+      } else if (data.needsFirstChild) {
+        router.replace("/remember-codes");
       } else {
         router.replace("/dashboard");
       }
@@ -94,6 +121,7 @@ export default function LoginPage() {
             value={code}
             onChange={(e) => {
               setCode(e.target.value.toUpperCase());
+              setCreateMentor(false);
               setError(null);
             }}
             placeholder="— — — — —"
@@ -108,12 +136,21 @@ export default function LoginPage() {
           </div>
 
           <SwipeToEnter
-            label="Swipe to Enter"
+            label={createMentor ? "Swipe to Signup" : "Swipe to Enter"}
             successLabel={welcome ? "Welcome!" : undefined}
-            disabled={loading}
+            disabled={loading || suggesting}
             loading={loading}
             onComplete={handleLogin}
           />
+
+          <button
+            type="button"
+            disabled={loading || suggesting}
+            onClick={() => void handleStartAsMentor()}
+            className="-mt-1 text-center text-xs font-medium tracking-[0.3px] text-[rgba(28,22,16,0.55)] underline underline-offset-2 transition disabled:opacity-50"
+          >
+            {suggesting ? "Finding a code…" : "Start as a Mentor"}
+          </button>
         </div>
       </div>
     </main>

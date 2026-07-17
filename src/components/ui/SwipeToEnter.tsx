@@ -32,8 +32,8 @@ export function SwipeToEnter({
   const [dragging, setDragging] = useState(false);
   const [done, setDone] = useState(false);
   const [entered, setEntered] = useState(false);
-  /** Static label left (px); preferred center, else cleared past the thumb. */
-  const [labelLeft, setLabelLeft] = useState<number | null>(null);
+  /** Preferred resting left (px); center when clear of thumb, else shifted right. */
+  const [restLabelLeft, setRestLabelLeft] = useState<number | null>(null);
   const startX = useRef(0);
   const startOffset = useRef(0);
   const offsetRef = useRef(0);
@@ -53,7 +53,7 @@ export function SwipeToEnter({
   const showSuccess = done && Boolean(successLabel);
   const labelText = loading ? "Please wait…" : label;
 
-  // Initial label seat only — does not follow the handle while swiping.
+  // Preferred resting seat — remeasure on track/label/font size changes.
   useLayoutEffect(() => {
     if (showSuccess) return;
 
@@ -67,14 +67,24 @@ export function SwipeToEnter({
       const thumbRight = padding + handleWidth;
       const minLeft = thumbRight + LABEL_THUMB_GAP;
       const centeredLeft = (trackW - labelW) / 2;
-      setLabelLeft(Math.max(centeredLeft, minLeft));
+      setRestLabelLeft(Math.max(centeredLeft, minLeft));
     }
 
     placeLabel();
+    void document.fonts?.ready?.then(placeLabel);
     const ro = new ResizeObserver(placeLabel);
     if (trackRef.current) ro.observe(trackRef.current);
+    if (labelRef.current) ro.observe(labelRef.current);
     return () => ro.disconnect();
   }, [labelText, showSuccess, handleWidth, padding]);
+
+  // While swiping: if the thumb crowds the label, keep pushing the label right.
+  const thumbRight = padding + handleWidth + offset;
+  const clearOfThumb = thumbRight + LABEL_THUMB_GAP;
+  const labelLeft =
+    restLabelLeft == null
+      ? null
+      : Math.max(restLabelLeft, clearOfThumb);
 
   function maxOffset() {
     const width = trackRef.current?.clientWidth ?? 360;
@@ -203,7 +213,7 @@ export function SwipeToEnter({
             transform: labelLeft == null ? "translateX(-50%)" : undefined,
             opacity: labelOpacity,
             color: labelColor,
-            transition: dragging ? "none" : "opacity 0.5s ease",
+            transition: dragging ? "none" : "left 0.25s ease-out, opacity 0.5s ease",
           }}
         >
           {labelText}

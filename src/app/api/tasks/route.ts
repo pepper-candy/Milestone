@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
+  sampleTemplateEntries,
+  sharedFieldsFromCatalogEntry,
+} from "@/lib/import-sample-template";
+import {
   ensureTasksForViewer,
   fetchViewerUserTasks,
   resolveLinkedChildIds,
@@ -115,11 +119,15 @@ function stripExtendedTaskColumns(
 function permissionDeniedHint(message: string, viaAdmin: boolean): string {
   if (!/permission denied|42501/i.test(message)) return "";
   if (viaAdmin) {
-    return " Service-role update was denied — check table ownership/grants for service_role.";
+    return (
+      " Service-role was denied — run supabase/fix_tasks_service_role_grants.sql" +
+      " in the Supabase SQL Editor (GRANT on tasks/user_tasks for service_role)."
+    );
   }
   return (
-    " Your session cannot UPDATE tasks. Run supabase/fix_tasks_update_permission.sql" +
-    " in the Supabase SQL Editor, and/or set SUPABASE_SERVICE_ROLE_KEY in .env.local."
+    " Your session cannot write tasks. Run supabase/fix_tasks_service_role_grants.sql" +
+    " (or fix_tasks_update_permission.sql) in the Supabase SQL Editor," +
+    " and/or set SUPABASE_SERVICE_ROLE_KEY in .env.local."
   );
 }
 
@@ -193,16 +201,15 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const lookup = searchParams.get("lookup")?.trim();
   if (lookup) {
+    // Prefer shared catalog templates so mentee instances never collide on lookup.
     const { data: match, error: lookupError } = await supabase
       .from("tasks")
       .select("*")
       .ilike("task_no", lookup)
+      .eq("is_catalog_template", true)
       .maybeSingle();
     if (lookupError) {
       return NextResponse.json({ error: lookupError.message }, { status: 500 });
-    }
-    if (match && match.is_catalog_template === false) {
-      return NextResponse.json({ task: null });
     }
     return NextResponse.json({ task: match });
   }
@@ -265,7 +272,8 @@ export async function POST(request: Request) {
       | "create"
       | "update"
       | "delete"
-      | "remove";
+      | "remove"
+      | "import_template";
     task_id?: string;
     user_task_id?: string;
     child_user_id?: string;
@@ -490,7 +498,8 @@ export async function POST(request: Request) {
     body.action === "create" ||
     body.action === "update" ||
     body.action === "delete" ||
-    body.action === "remove"
+    body.action === "remove" ||
+    body.action === "import_template"
   ) {
     if (isChild) {
       return NextResponse.json(
@@ -498,6 +507,127 @@ export async function POST(request: Request) {
         { status: 403 },
       );
     }
+  }
+
+  if (body.action === "import_template") {
+    const childUserId = body.child_user_id;
+    if (!childUserId) {
+      return NextResponse.json(
+        { error: "child_user_id required" },
+        { status: 400 },
+      );
+    }
+
+    const linkedChildIds = await resolveLinkedChildIds(
+      supabase,
+      profile?.linked_children,
+    );
+    if (!linkedChildIds.includes(childUserId)) {
+      return NextResponse.json(
+        { error: "Task does not belong to a linked child" },
+        { status: 403 },
+      );
+    }
+
+    const { data: existingAssignments, error: existingError } = await supabase
+      .from("user_tasks")
+      .select("id, status")
+      .eq("user_id", childUserId)
+      .neq("status", "removed");
+
+    if (existingError) {
+      return NextResponse.json(
+        { error: existingError.message },
+        { status: 500 },
+      );
+    }
+
+    if ((existingAssignments ?? []).length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "This mentee already has tasks. Import is only available when Your Tasks is empty.",
+        },
+        { status: 409 },
+      );
+    }
+
+    const { client: writeClient, viaAdmin } = tasksWriteClient(supabase);
+    const entries = sampleTemplateEntries();
+    let createdCount = 0;
+    let catalogSeeded = 0;
+
+    for (const entry of entries) {
+      const sharedFields = sharedFieldsFromCatalogEntry(entry);
+
+      const { data: existingTemplate } = await writeClient
+        .from("tasks")
+        .select("id")
+        .ilike("task_no", entry.task_no)
+        .eq("is_catalog_template", true)
+        .maybeSingle();
+
+      if (!existingTemplate) {
+        const { error: seedError } = await writeClient.from("tasks").insert({
+          ...sharedFields,
+          is_catalog_template: true,
+        });
+        if (seedError) {
+          console.warn(
+            "[import_template] catalog seed skipped:",
+            entry.task_no,
+            seedError.message,
+          );
+        } else {
+          catalogSeeded += 1;
+        }
+      }
+
+      const { data: instance, error: instanceError } = await writeClient
+        .from("tasks")
+        .insert({ ...sharedFields, is_catalog_template: false })
+        .select("id")
+        .single();
+
+      if (instanceError || !instance) {
+        const uniqueHint =
+          instanceError?.code === "23505" ||
+          /duplicate key|unique constraint/i.test(instanceError?.message ?? "")
+            ? " Run supabase/migrate_mentee_task_instances.sql so mentee instances can share a task_no."
+            : "";
+        return NextResponse.json(
+          {
+            error: `${instanceError?.message || "Could not create task instance"}${uniqueHint}${permissionDeniedHint(instanceError?.message ?? "", viaAdmin)}`,
+          },
+          { status: 500 },
+        );
+      }
+
+      const { error: assignError } = await writeClient.from("user_tasks").insert({
+        user_id: childUserId,
+        task_id: instance.id,
+        status: "available",
+      });
+
+      if (assignError) {
+        const parentHint =
+          /permission denied|42501/i.test(assignError.message) && !viaAdmin
+            ? " Run supabase/fix_parent_create_task.sql so parents can assign tasks, and/or set SUPABASE_SERVICE_ROLE_KEY."
+            : permissionDeniedHint(assignError.message, viaAdmin);
+        return NextResponse.json(
+          { error: `${assignError.message}${parentHint}` },
+          { status: 500 },
+        );
+      }
+
+      createdCount += 1;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      created: createdCount,
+      catalogSeeded,
+    });
   }
 
   if (body.action === "create" && body.task) {
@@ -543,7 +673,7 @@ export async function POST(request: Request) {
     }
 
     const { client: writeClient, viaAdmin } = tasksWriteClient(supabase);
-    const insertRow = {
+    const sharedFields = {
       task_no: taskNo,
       category:
         patch.category?.trim() ||
@@ -562,26 +692,51 @@ export async function POST(request: Request) {
       prereq_1: patch.prereq_1 ?? null,
       prereq_2: patch.prereq_2 ?? null,
       prereqs: patch.prereqs ?? null,
-      is_catalog_template: seedCatalog,
       seq: null,
     };
 
+    // Mentee always gets a dedicated instance (never the shared catalog row).
     const { data: created, error: createError } = await writeClient
       .from("tasks")
-      .insert(insertRow)
+      .insert({ ...sharedFields, is_catalog_template: false })
       .select("*")
       .single();
 
     if (createError) {
+      console.error("[tasks create] insert instance failed:", createError);
+      const uniqueHint =
+        createError.code === "23505" ||
+        /duplicate key|unique constraint/i.test(createError.message)
+          ? " Run supabase/migrate_mentee_task_instances.sql (drop global tasks_task_no_key; keep catalog partial unique) so mentee instances can share a task_no."
+          : "";
       return NextResponse.json(
         {
-          error: `${createError.message}${permissionDeniedHint(createError.message, viaAdmin)}`,
+          error: `${createError.message}${uniqueHint}${permissionDeniedHint(createError.message, viaAdmin)}`,
         },
         { status: 500 },
       );
     }
 
-    const { data: userTask, error: assignError } = await supabase
+    // Optionally seed a separate shared catalog template for others to load.
+    if (seedCatalog && !catalogTemplate) {
+      const { error: seedError } = await writeClient.from("tasks").insert({
+        ...sharedFields,
+        is_catalog_template: true,
+      });
+      if (seedError) {
+        const uniqueSeed =
+          seedError.code === "23505" ||
+          /duplicate key|unique constraint/i.test(seedError.message);
+        console.warn(
+          "[tasks create] catalog seed skipped:",
+          seedError.message,
+          uniqueSeed ? "(template already exists)" : "",
+        );
+      }
+    }
+
+    // Assign to mentee (admin client bypasses user_tasks RLS that only allows self-insert).
+    const { data: userTask, error: assignError } = await writeClient
       .from("user_tasks")
       .insert({
         user_id: childUserId,
@@ -592,7 +747,17 @@ export async function POST(request: Request) {
       .single();
 
     if (assignError) {
-      return NextResponse.json({ error: assignError.message }, { status: 500 });
+      console.error("[tasks create] assign mentee failed:", assignError);
+      const parentHint =
+        /permission denied|42501/i.test(assignError.message) && !viaAdmin
+          ? " Run supabase/fix_parent_create_task.sql so parents can assign tasks, and/or set SUPABASE_SERVICE_ROLE_KEY."
+          : permissionDeniedHint(assignError.message, viaAdmin);
+      return NextResponse.json(
+        {
+          error: `${assignError.message}${parentHint}`,
+        },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json({ task: created, userTask });

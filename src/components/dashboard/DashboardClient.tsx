@@ -33,6 +33,10 @@ type Props = {
   tasksWarning?: string;
   /** Child profile UUID(s) this dashboard watches (own id for child; linked kids for parent). */
   subjectIds?: string[];
+  /** Selected mentee nickname when parent is viewing. */
+  subjectNickname?: string | null;
+  /** Selected mentee invite code — title fallback before nickname is set. */
+  subjectInviteCode?: string | null;
   dailyQuote: DailyQuote;
 };
 
@@ -45,7 +49,7 @@ const CONTENT_GAP = 12;
 
 export function DashboardClient({
   profile,
-  tasks,
+  tasks: initialTasks,
   userTasks: initialUserTasks,
   milestones,
   initialActive,
@@ -53,10 +57,13 @@ export function DashboardClient({
   sessionLogs = [],
   tasksWarning,
   subjectIds = [],
+  subjectNickname = null,
+  subjectInviteCode = null,
   dailyQuote,
 }: Props) {
   const router = useRouter();
   const [active, setActive] = useState(initialActive);
+  const [tasks, setTasks] = useState(initialTasks);
   const [userTasks, setUserTasks] = useState(initialUserTasks);
   const [logs, setLogs] = useState(sessionLogs);
   const [liveSessionExp, setLiveSessionExp] = useState(sessionExp);
@@ -114,6 +121,10 @@ export function DashboardClient({
       history.scrollRestoration = prev;
     };
   }, []);
+
+  useEffect(() => {
+    setTasks(initialTasks);
+  }, [initialTasks]);
 
   useEffect(() => {
     setUserTasks(initialUserTasks);
@@ -228,7 +239,13 @@ export function DashboardClient({
   async function refreshTasks() {
     const res = await fetch("/api/tasks");
     if (!res.ok) return;
-    const data = (await res.json()) as { userTasks: UserTask[] };
+    const data = (await res.json()) as {
+      tasks?: Task[];
+      userTasks: UserTask[];
+    };
+    // Import/create inserts new task *instances* — must refresh tasks too,
+    // not only user_tasks, or Your Tasks stays empty (ids won't match).
+    if (data.tasks) setTasks(data.tasks);
     setUserTasks(data.userTasks ?? []);
     router.refresh();
   }
@@ -488,6 +505,8 @@ export function DashboardClient({
           userTasks={userTasks}
           isChild={profile.is_child}
           subjectUserId={subjectIds[0] ?? null}
+          subjectNickname={subjectNickname}
+          subjectInviteCode={subjectInviteCode}
           sessionLogs={logs}
           onChanged={refreshTasks}
         />
