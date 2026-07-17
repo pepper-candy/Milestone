@@ -1338,6 +1338,11 @@ function useStagedExpand(enabled: boolean) {
   const labelOpacity =
     phase === "opening-sides" || phase === "closing-text" ? 0 : 1;
 
+  function forceOpen() {
+    clearTimer();
+    setPhase("open");
+  }
+
   return {
     phase,
     sidesGone,
@@ -1346,6 +1351,7 @@ function useStagedExpand(enabled: boolean) {
     labelOpacity,
     toggle,
     collapse: startClose,
+    forceOpen,
   };
 }
 
@@ -1416,6 +1422,48 @@ function PhaseLabel({
 
 const CREATE_REVEAL_MS = 500;
 const CREATE_REVEAL_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+/** Existing-task edit morph (fade → height → reveal). */
+const EDIT_MORPH_FADE_MS = 280;
+const EDIT_MORPH_HEIGHT_MS = 500;
+const EDIT_MORPH_REVEAL_MS = 500;
+/** Fallback only when measurement fails. */
+const EDIT_CARD_H_FALLBACK = 280;
+
+/**
+ * Read the card's natural content height while it is height-locked.
+ * Temporarily unlocks without transition, measures, then restores `lockedH`
+ * so React can animate to the measured target next.
+ */
+function measureNaturalCardHeight(
+  el: HTMLElement,
+  lockedH: number,
+  fallback: number,
+): number {
+  const prevTransition = el.style.transition;
+  const expanders = Array.from(
+    el.querySelectorAll<HTMLElement>("[data-expanding-body]"),
+  );
+  const prevExpanderMax = expanders.map((node) => node.style.maxHeight);
+
+  el.style.transition = "none";
+  el.style.height = "auto";
+  el.style.minHeight = "0";
+  el.style.maxHeight = "none";
+  for (const node of expanders) node.style.maxHeight = "none";
+  void el.offsetHeight;
+  const measured = Math.ceil(el.getBoundingClientRect().height) || fallback;
+
+  el.style.height = `${lockedH}px`;
+  el.style.minHeight = `${lockedH}px`;
+  el.style.maxHeight = `${lockedH}px`;
+  expanders.forEach((node, i) => {
+    node.style.maxHeight = prevExpanderMax[i] ?? "";
+  });
+  void el.offsetHeight;
+  el.style.transition = prevTransition;
+
+  return measured;
+}
 
 function createContentRevealStyle(revealed: boolean): CSSProperties {
   return {
@@ -1431,6 +1479,14 @@ function createSidebarRevealStyle(revealed: boolean): CSSProperties {
     transform: revealed ? "translateX(0)" : "translateX(-100%)",
     transition: `opacity ${CREATE_REVEAL_MS}ms ${CREATE_REVEAL_EASE}, transform ${CREATE_REVEAL_MS}ms ${CREATE_REVEAL_EASE}`,
     pointerEvents: revealed ? undefined : "none",
+  };
+}
+
+function editMorphFadeStyle(opacity: number, ms = EDIT_MORPH_REVEAL_MS): CSSProperties {
+  return {
+    opacity,
+    transition: `opacity ${ms}ms ${CREATE_REVEAL_EASE}`,
+    pointerEvents: opacity < 1 ? "none" : undefined,
   };
 }
 const exitStyle = (gone: boolean): CSSProperties => ({
@@ -1465,6 +1521,7 @@ function ExpandingBody({
   labelOpacity,
   phase,
   reserveRail,
+  expandInstant = false,
 }: {
   paragraphs: string[];
   compactLine: string;
@@ -1474,6 +1531,8 @@ function ExpandingBody({
   phase: Phase;
   /** Inset lead (and compact mode) to clear the action rail — same width as title. */
   reserveRail?: string;
+  /** Skip internal height tween (used while card shell morphs height). */
+  expandInstant?: boolean;
 }) {
   // Expanded: lead stays PhaseLabel only; Aim + body are separate.
   const leadText = useExpandedCopy
@@ -1482,17 +1541,28 @@ function ExpandingBody({
   const bodyParas = useExpandedCopy ? paragraphs.slice(1) : [];
   const innerRef = useRef<HTMLDivElement>(null);
   const [maxH, setMaxH] = useState(COLLAPSED_BODY_H);
+  const wasExpandedRef = useRef(false);
 
   useLayoutEffect(() => {
     const el = innerRef.current;
     if (!el) return;
 
     if (!detailsOpen) {
+      wasExpandedRef.current = false;
       setMaxH(COLLAPSED_BODY_H);
       return;
     }
 
     const target = el.scrollHeight;
+
+    // Instant morph exit, or already open — sync height only (no collapse jump).
+    if (expandInstant || wasExpandedRef.current) {
+      wasExpandedRef.current = true;
+      setMaxH(target);
+      return;
+    }
+
+    wasExpandedRef.current = true;
     setMaxH(COLLAPSED_BODY_H);
     let raf2 = 0;
     const raf1 = window.requestAnimationFrame(() => {
@@ -1502,17 +1572,18 @@ function ExpandingBody({
       window.cancelAnimationFrame(raf1);
       window.cancelAnimationFrame(raf2);
     };
-  }, [detailsOpen, leadText, useExpandedCopy, paragraphs]);
+  }, [detailsOpen, leadText, useExpandedCopy, paragraphs, expandInstant]);
 
   return (
     <div
+      data-expanding-body
       className="mt-0.5"
       style={{
         maxHeight: maxH,
         overflow: "hidden",
-        transition: `max-height ${EXPAND_MS}ms ${
-          detailsOpen ? HEIGHT_EASE : EASE
-        }`,
+        transition: expandInstant
+          ? undefined
+          : `max-height ${EXPAND_MS}ms ${detailsOpen ? HEIGHT_EASE : EASE}`,
       }}
     >
       <div ref={innerRef} className="space-y-2">
@@ -1600,10 +1671,33 @@ export function TaskCard({
   const [logRevealed, setLogRevealed] = useState(false);
   const logFlipBusy = useRef(false);
   const removeDoneRef = useRef(false);
+  const cardRef = useRef<HTMLElement | null>(null);
+  const editMorphTimers = useRef<number[]>([]);
+  /** View chrome opacity while morphing into/out of edit. */
+  const [viewFade, setViewFade] = useState(1);
+  /** Edit chrome opacity while morphing into/out of edit. */
+  const [editFade, setEditFade] = useState(creating ? 1 : 0);
+  /** Sidebar slide for edit enter-from-expanded / edit exit. */
+  const [editSidebarIn, setEditSidebarIn] = useState(creating);
+  const [editFromExpanded, setEditFromExpanded] = useState(false);
+  const [editMorphing, setEditMorphing] = useState(false);
+  const [shellMaxH, setShellMaxH] = useState<number | null>(null);
+  /** Only true while intentionally tweening shell height (avoids unlock “second” anim). */
+  const [shellHeightAnim, setShellHeightAnim] = useState(false);
+  /** Instant-expand ExpandingBody while shell morphs after save/cancel. */
+  const [expandInstant, setExpandInstant] = useState(false);
+  /** Bumps when exit morph needs a post-commit height measure. */
+  const [exitMeasureNonce, setExitMeasureNonce] = useState(0);
+  const exitMeasureFromHRef = useRef<number | null>(null);
 
   const detail = task ? detailForTask(task) : null;
   const interactiveBlocked =
-    celebrate || deleteRitual || deleteClosing || removing || editing;
+    celebrate ||
+    deleteRitual ||
+    deleteClosing ||
+    removing ||
+    editing ||
+    editMorphing;
   const canExpand =
     Boolean(detail) && !locked && !interactiveBlocked;
 
@@ -1734,6 +1828,7 @@ export function TaskCard({
     labelOpacity,
     toggle,
     collapse,
+    forceOpen,
   } = useStagedExpand(canExpand);
 
   // -------- Finished / session log --------
@@ -1992,13 +2087,125 @@ export function TaskCard({
     pointerEvents: editSwapOpacity < 1 ? "none" : undefined,
   };
 
+  function clearEditMorphTimers() {
+    for (const id of editMorphTimers.current) window.clearTimeout(id);
+    editMorphTimers.current = [];
+  }
+
+  function afterEditMorph(ms: number, fn: () => void) {
+    editMorphTimers.current.push(window.setTimeout(fn, ms));
+  }
+
+  useEffect(() => {
+    return () => clearEditMorphTimers();
+  }, []);
+
+  // After cancel/save swaps back to expanded view, measure once layout + ExpandingBody
+  // have settled, then animate shell height to that exact target (single tween).
+  useLayoutEffect(() => {
+    if (exitMeasureFromHRef.current == null || editing) return;
+    const fromH = exitMeasureFromHRef.current;
+
+    let cancelled = false;
+    let innerRaf = 0;
+    const outerRaf = window.requestAnimationFrame(() => {
+      innerRaf = window.requestAnimationFrame(() => {
+        if (cancelled) return;
+        if (exitMeasureFromHRef.current == null) return;
+        exitMeasureFromHRef.current = null;
+        const el = cardRef.current;
+        const targetH = el
+          ? measureNaturalCardHeight(el, fromH, fromH)
+          : fromH;
+        setShellHeightAnim(true);
+        setShellMaxH(targetH);
+
+        afterEditMorph(EDIT_MORPH_HEIGHT_MS, () => {
+          setViewFade(1);
+          afterEditMorph(EDIT_MORPH_REVEAL_MS, () => {
+            setShellHeightAnim(false);
+            setShellMaxH(null);
+            setExpandInstant(false);
+            setEditMorphing(false);
+            setEditFromExpanded(false);
+          });
+        });
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(outerRaf);
+      window.cancelAnimationFrame(innerRaf);
+    };
+  }, [exitMeasureNonce, editing]);
+
   function beginEdit() {
-    if (detailsOpen) collapse();
-    resetCatalogEditState();
-    resetEditSwapState();
-    setDraft(draftFromTask(task!));
-    setAdvanceOpen(false);
-    setEditing(true);
+    if (creating || editMorphing || editing) return;
+    const fromExpanded = detailsOpen;
+    const fromH = cardRef.current?.offsetHeight ?? (fromExpanded ? 320 : 82);
+    setEditMorphing(true);
+    setEditFromExpanded(fromExpanded);
+    clearEditMorphTimers();
+    setShellHeightAnim(false);
+    // Lock current height so the later content swap can't collapse the card.
+    setShellMaxH(fromH);
+    setViewFade(0);
+
+    afterEditMorph(EDIT_MORPH_FADE_MS, () => {
+      resetCatalogEditState();
+      resetEditSwapState();
+      setDraft(draftFromTask(task!));
+      setAdvanceOpen(false);
+      setEditing(true);
+      setEditFade(0);
+      // Collapsed: sidebar already present — keep it. Expanded: slide in on reveal.
+      setEditSidebarIn(!fromExpanded);
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = cardRef.current;
+          const targetH = el
+            ? measureNaturalCardHeight(el, fromH, EDIT_CARD_H_FALLBACK)
+            : EDIT_CARD_H_FALLBACK;
+          setShellHeightAnim(true);
+          setShellMaxH(targetH);
+
+          afterEditMorph(EDIT_MORPH_HEIGHT_MS, () => {
+            setEditFade(1);
+            if (fromExpanded) setEditSidebarIn(true);
+            afterEditMorph(EDIT_MORPH_REVEAL_MS, () => {
+              setShellHeightAnim(false);
+              setShellMaxH(null);
+              setEditMorphing(false);
+            });
+          });
+        });
+      });
+    });
+  }
+
+  function finishEditToExpanded() {
+    const fromH = cardRef.current?.offsetHeight ?? EDIT_CARD_H_FALLBACK;
+    setEditMorphing(true);
+    clearEditMorphTimers();
+    setShellHeightAnim(false);
+    setShellMaxH(fromH);
+    setEditFade(0);
+    setEditSidebarIn(false);
+    setExpandInstant(true);
+
+    afterEditMorph(EDIT_MORPH_REVEAL_MS, () => {
+      exitMeasureFromHRef.current = fromH;
+      setEditing(false);
+      setAdvanceOpen(false);
+      setDraft(null);
+      resetCatalogEditState();
+      resetEditSwapState();
+      forceOpen();
+      setViewFade(0);
+      setExitMeasureNonce((n) => n + 1);
+    });
   }
 
   function cancelEdit() {
@@ -2006,11 +2213,8 @@ export function TaskCard({
       onCancelCreate?.();
       return;
     }
-    setEditing(false);
-    setAdvanceOpen(false);
-    setDraft(null);
-    resetCatalogEditState();
-    resetEditSwapState();
+    if (editMorphing) return;
+    finishEditToExpanded();
   }
 
   function loadCatalogIntoDraft() {
@@ -2032,6 +2236,7 @@ export function TaskCard({
 
   async function saveEdit() {
     if (!draft) return;
+    if (editMorphing && !creating) return;
     const { detail_aim, detail_body } = splitDetailExtras(draft.detail_extras);
     const trimmedNo = normalizeTaskNo(draft.task_no);
     if (!trimmedNo) {
@@ -2072,11 +2277,7 @@ export function TaskCard({
     if (!onUpdate) return;
     const ok = await onUpdate(patch);
     if (ok === false) return;
-    setEditing(false);
-    setAdvanceOpen(false);
-    setDraft(null);
-    resetCatalogEditState();
-    resetEditSwapState();
+    finishEditToExpanded();
   }
 
   function beginDelete() {
@@ -2191,13 +2392,14 @@ export function TaskCard({
 
   return (
     <article
+      ref={cardRef}
       className={`relative overflow-hidden ${
         creatingEmbedded
           ? "rounded-none border-0 bg-transparent shadow-none"
           : `rounded-2xl border border-[rgba(200,146,42,0.18)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
               celebrate ? "" : "bg-[rgba(255,250,242,0.9)]"
             }`
-      } ${canExpand && !editing ? "cursor-pointer" : ""}`}
+      } ${canExpand && !editing && !editMorphing ? "cursor-pointer" : ""}`}
       onClick={
         interactiveBlocked || editing
           ? undefined
@@ -2207,12 +2409,25 @@ export function TaskCard({
       style={{
         opacity: fadingOut ? 0 : 1,
         background: celebrate ? WASH_COLOR : undefined,
-        minHeight: creating && createContentRevealed ? 240 : undefined,
-        transition:
+        minHeight:
+          shellMaxH != null
+            ? shellMaxH
+            : creating && createContentRevealed
+              ? 240
+              : undefined,
+        height: shellMaxH ?? undefined,
+        maxHeight: shellMaxH ?? undefined,
+        transition: [
           celebrate || removing
             ? `opacity ${CELEBRATE_FADE_MS}ms ease`
-            : undefined,
-        pointerEvents: celebrate || removing ? "none" : undefined,
+            : null,
+          shellHeightAnim && shellMaxH != null
+            ? `height ${EDIT_MORPH_HEIGHT_MS}ms ${CREATE_REVEAL_EASE}, max-height ${EDIT_MORPH_HEIGHT_MS}ms ${CREATE_REVEAL_EASE}, min-height ${EDIT_MORPH_HEIGHT_MS}ms ${CREATE_REVEAL_EASE}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(", ") || undefined,
+        pointerEvents: celebrate || removing || editMorphing ? "none" : undefined,
       }}
     >
       <CompletionRitual
@@ -2250,7 +2465,9 @@ export function TaskCard({
           style={
             creating
               ? createContentRevealStyle(createContentRevealed)
-              : undefined
+              : editing
+                ? editMorphFadeStyle(editFade)
+                : editMorphFadeStyle(viewFade, EDIT_MORPH_FADE_MS)
           }
         >
           {editing ? (
@@ -2259,7 +2476,7 @@ export function TaskCard({
                 <CircleIconButton
                   label="Save changes"
                   tone="green"
-                  disabled={busy}
+                  disabled={busy || editMorphing}
                   onClick={() => void saveEdit()}
                 >
                   {busy ? (
@@ -2271,7 +2488,7 @@ export function TaskCard({
                 <CircleIconButton
                   label="Cancel edit"
                   tone="red"
-                  disabled={busy}
+                  disabled={busy || editMorphing}
                   onClick={cancelEdit}
                 >
                   <CloseIcon size={14} />
@@ -2313,7 +2530,7 @@ export function TaskCard({
                   <CircleIconButton
                     label="Edit task"
                     tone="purple"
-                    disabled={busy}
+                    disabled={busy || editMorphing}
                     onClick={beginEdit}
                   >
                     <PencilIcon size={14} />
@@ -2369,11 +2586,33 @@ export function TaskCard({
                     width: 64,
                     minWidth: 64,
                   }
-                : {
-                    ...exitStyle(sidesGone && !editing),
-                    width: sidesGone && !editing ? 0 : 64,
-                    minWidth: sidesGone && !editing ? 0 : 64,
-                  }),
+                : editing
+                  ? editFromExpanded || !editSidebarIn
+                    ? {
+                        ...createSidebarRevealStyle(editSidebarIn),
+                        width: 64,
+                        minWidth: 64,
+                      }
+                    : {
+                        width: 64,
+                        minWidth: 64,
+                        opacity: 1,
+                      }
+                  : expandInstant
+                    ? {
+                        // Exit morph: snap sidebar away so height measure matches final layout.
+                        width: 0,
+                        minWidth: 0,
+                        opacity: 0,
+                        overflow: "hidden",
+                        transition: "none",
+                        pointerEvents: "none",
+                      }
+                    : {
+                        ...exitStyle(sidesGone),
+                        width: sidesGone ? 0 : 64,
+                        minWidth: sidesGone ? 0 : 64,
+                      }),
               alignSelf: "stretch",
               minHeight: 82,
             }}
@@ -2381,8 +2620,12 @@ export function TaskCard({
             {editing && draft ? (
               <div
                 className="flex h-full w-full items-center justify-center"
-                style={editSwapFadeStyle}
+                style={!creating ? editMorphFadeStyle(editFade) : undefined}
               >
+                <div
+                  className="flex h-full w-full items-center justify-center"
+                  style={editSwapFadeStyle}
+                >
                 {advanceOpen ? (
                   <PrereqSidebarStrip
                     count={filledPrereqCount(draft.prerequisites)}
@@ -2422,14 +2665,23 @@ export function TaskCard({
                     })}
                   </div>
                 )}
+                </div>
               </div>
             ) : (
-              <TaskGlyph
-                task={task}
-                locked={false}
-                claimed={claimed}
-                iconOverride={draft?.icon_key}
-              />
+              <div
+                style={
+                  !creating
+                    ? editMorphFadeStyle(viewFade, EDIT_MORPH_FADE_MS)
+                    : undefined
+                }
+              >
+                <TaskGlyph
+                  task={task}
+                  locked={false}
+                  claimed={claimed}
+                  iconOverride={draft?.icon_key}
+                />
+              </div>
             )}
           </div>
 
@@ -2441,7 +2693,9 @@ export function TaskCard({
                     ...(creatingEmbedded ? { marginLeft: 64 } : {}),
                     ...createContentRevealStyle(createContentRevealed),
                   }
-                : undefined
+                : editing
+                  ? editMorphFadeStyle(editFade)
+                  : editMorphFadeStyle(viewFade, EDIT_MORPH_FADE_MS)
             }
           >
             {editing && draft ? (
@@ -2608,6 +2862,7 @@ export function TaskCard({
                     labelOpacity={labelOpacity}
                     phase={phase}
                     reserveRail={railPad}
+                    expandInstant={expandInstant}
                   />
                 ) : compactSubtitle ? (
                   <p
