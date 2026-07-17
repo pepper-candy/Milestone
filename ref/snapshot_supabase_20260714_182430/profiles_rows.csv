@@ -1,8 +1,0 @@
-id,invitation_code,nickname,avatar_url,is_child,linked_parents,linked_children,created_at
-17080e87-4481-4f04-88df-6e3302da957b,P0W3R,powerful,,false,[],"[""QU35T""]",2026-07-14 09:21:59.622743
-289e0bec-ba70-46e5-89c0-a27782fa717e,5P4RK,,,true,"[""R34DY"",""CL1MB"",""M1L35""]",[],2026-07-14 09:21:59.622743
-3428ea88-f364-40e4-9f43-10626fb89a09,R34DY,,,false,[],"[""5P4RK""]",2026-07-14 09:21:59.622743
-50eb47c4-64f1-42a3-a06c-0016d0f4994a,7R4CK,,,false,[],"[""QU35T""]",2026-07-14 09:21:59.622743
-86453042-6d66-489f-af76-267923921d04,QU35T,my_nickname,,true,"[""P0W3R"",""7R4CK""]",[],2026-07-14 09:21:59.622743
-c09e70b6-45a9-4eb6-862b-d42e0b96e003,CL1MB,,,false,[],"[""5P4RK""]",2026-07-14 09:21:59.622743
-d22c06b2-e869-44c2-a214-b156eb75c6bc,M1L35,,,false,[],"[""5P4RK""]",2026-07-14 09:21:59.622743

@@ -42,3 +42,7 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Local reference / DB dumps / invite codes / photos — never publish
+/ref/**
+!/ref/README.md
