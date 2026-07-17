@@ -47,8 +47,10 @@ type FinishedEntry =
 const SESSION_TOGGLE_FADE_MS = 500;
 /** Compact session log row height (h-[58px]). */
 const SESSION_CARD_H = 58;
-/** Matches space-y-3 (0.75rem) between finished cards. */
-const FINISHED_GAP_PX = 12;
+/** Matches former space-y-3 (0.75rem) between task cards. */
+const TASK_CARD_GAP_PX = 12;
+const FINISHED_GAP_PX = TASK_CARD_GAP_PX;
+
 const SESSION_SLOT_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 const SECTION_ANIM_MS = 500;
@@ -65,6 +67,36 @@ const ADD_SHELL_CLASS =
   "overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.22)] bg-[rgba(255,250,242,0.95)] shadow-[0px_2px_8px_0px_rgba(200,146,42,0.08)]";
 
 type AddTaskPhase = "idle" | "expand" | "revealed";
+
+/** Soft appear for empty-state CTAs (avoids a hard pop). */
+function FadeInOnMount({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => setVisible(true));
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div
+      className={className}
+      style={{
+        opacity: visible ? 1 : 0,
+        transition: `opacity ${SECTION_ANIM_MS}ms ease`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 function AddNewTaskBlock({
   busy,
@@ -238,7 +270,7 @@ function CollapsibleSection({
   emptyMessage = "Nothing here yet.",
   emptyContent,
   headerEnd,
-  contentClassName = "space-y-3",
+  contentClassName = "flex flex-col",
 }: {
   title: ReactNode;
   /** Plain text for aria labels when title is rich. */
@@ -384,8 +416,15 @@ function CollapsibleSection({
   );
 }
 
-function seqOf(task: Task): number {
-  return task.seq ?? Number.MAX_SAFE_INTEGER;
+/** Sequenced tasks by seq; unsequenced by exp×20+gem (larger higher). */
+function compareActiveTasks(a: Task, b: Task): number {
+  const aHasSeq = a.seq != null;
+  const bHasSeq = b.seq != null;
+  if (aHasSeq && bHasSeq) return (a.seq as number) - (b.seq as number);
+  if (aHasSeq) return -1;
+  if (bHasSeq) return 1;
+  const score = (t: Task) => t.exp * 20 + t.gem;
+  return score(b) - score(a);
 }
 
 function buildClaimedNos(tasks: Task[], userTasks: UserTask[]): Set<string> {
@@ -452,8 +491,8 @@ function partitionTasks(
     yourTasks.push(task);
   }
 
-  yourTasks.sort((a, b) => seqOf(a) - seqOf(b));
-  lockedTasks.sort((a, b) => seqOf(a) - seqOf(b));
+  yourTasks.sort(compareActiveTasks);
+  lockedTasks.sort(compareActiveTasks);
 
   const finished: FinishedEntry[] = [
     ...finishedTasks,
@@ -701,11 +740,6 @@ export function TaskList({
         next.add(task.id);
         return next;
       });
-      setCollapsingIds((prev) => {
-        const next = new Set(prev);
-        next.add(task.id);
-        return next;
-      });
       await onChanged?.();
       const childId = userTask?.user_id;
       if (childId) void notifyFamilySync(childId, "tasks");
@@ -814,7 +848,7 @@ export function TaskList({
   const showImport = !isChild && !hasActiveAssignments;
 
   const importEmptyButton = showImport ? (
-    <div className="space-y-2">
+    <FadeInOnMount className="space-y-2">
       <div className={ADD_SHELL_CLASS}>
         <button
           type="button"
@@ -835,7 +869,7 @@ export function TaskList({
       {importError ? (
         <p className="px-1 text-center text-sm text-red-600">{importError}</p>
       ) : null}
-    </div>
+    </FadeInOnMount>
   ) : null;
 
   const addTaskBlock = !isChild ? (
@@ -886,20 +920,29 @@ export function TaskList({
         empty={yourTasks.length === 0}
         emptyContent={importEmptyButton ?? undefined}
       >
-        {yourTasks.map((task) => {
+        {yourTasks.map((task, index) => {
           const celebrating = celebratingIds.has(task.id);
           const collapsing = collapsingIds.has(task.id);
           const removing = removingIds.has(task.id);
+          const prevCollapsing =
+            index > 0 && collapsingIds.has(yourTasks[index - 1].id);
+          // Collapse this card's top gap with it (and the next card's gap when
+          // this is first) so only one fill runs — not height then margin.
+          const marginTop =
+            index === 0 || collapsing || prevCollapsing ? 0 : TASK_CARD_GAP_PX;
           return (
             <div
               key={task.id}
               className="overflow-hidden"
               style={{
                 maxHeight: collapsing ? 0 : 960,
+                marginTop,
                 opacity: collapsing ? 0 : 1,
                 transition: collapsing
-                  ? `max-height ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${CELEBRATE_FADE_MS}ms ease`
-                  : undefined,
+                  ? `max-height ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), margin-top ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${CELEBRATE_FADE_MS}ms ease`
+                  : prevCollapsing
+                    ? `margin-top ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
+                    : undefined,
               }}
             >
               <TaskCard
@@ -911,6 +954,15 @@ export function TaskList({
                 removing={removing}
                 onCelebrateFadeStart={() =>
                   setCollapsingIds((prev) => {
+                    if (prev.has(task.id)) return prev;
+                    const next = new Set(prev);
+                    next.add(task.id);
+                    return next;
+                  })
+                }
+                onRemoveFadeStart={() =>
+                  setCollapsingIds((prev) => {
+                    if (prev.has(task.id)) return prev;
                     const next = new Set(prev);
                     next.add(task.id);
                     return next;
@@ -939,19 +991,26 @@ export function TaskList({
         defaultOpen={false}
         empty={lockedTasks.length === 0}
       >
-        {lockedTasks.map((task) => {
+        {lockedTasks.map((task, index) => {
           const collapsing = collapsingIds.has(task.id);
           const removing = removingIds.has(task.id);
+          const prevCollapsing =
+            index > 0 && collapsingIds.has(lockedTasks[index - 1].id);
+          const marginTop =
+            index === 0 || collapsing || prevCollapsing ? 0 : TASK_CARD_GAP_PX;
           return (
             <div
               key={task.id}
               className="overflow-hidden"
               style={{
                 maxHeight: collapsing ? 0 : 960,
+                marginTop,
                 opacity: collapsing ? 0 : 1,
                 transition: collapsing
-                  ? `max-height ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${CELEBRATE_FADE_MS}ms ease`
-                  : undefined,
+                  ? `max-height ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), margin-top ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${CELEBRATE_FADE_MS}ms ease`
+                  : prevCollapsing
+                    ? `margin-top ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
+                    : undefined,
               }}
             >
               <TaskCard
@@ -962,6 +1021,14 @@ export function TaskList({
                 lockHints={unmetPrereqHints(task, prereqStats, knownTaskNos)}
                 busy={busyId === task.id}
                 removing={removing}
+                onRemoveFadeStart={() =>
+                  setCollapsingIds((prev) => {
+                    if (prev.has(task.id)) return prev;
+                    const next = new Set(prev);
+                    next.add(task.id);
+                    return next;
+                  })
+                }
                 onRemoveDone={() => finishRemove(task.id)}
                 onUpdate={
                   isChild

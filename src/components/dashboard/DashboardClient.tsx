@@ -19,7 +19,7 @@ import type {
 } from "@/types";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 type Props = {
@@ -62,6 +62,8 @@ export function DashboardClient({
   dailyQuote,
 }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
+  const [openingProfile, setOpeningProfile] = useState(false);
   const [active, setActive] = useState(initialActive);
   const [tasks, setTasks] = useState(initialTasks);
   const [userTasks, setUserTasks] = useState(initialUserTasks);
@@ -111,6 +113,10 @@ export function DashboardClient({
     router.prefetch("/profile");
     prefetchProfile();
   }, [router]);
+
+  useEffect(() => {
+    if (pathname === "/dashboard") setOpeningProfile(false);
+  }, [pathname]);
 
   // Prevent the browser from restoring a mid-list scroll under the fixed header.
   useEffect(() => {
@@ -351,8 +357,10 @@ export function DashboardClient({
           <Link
             href="/profile"
             prefetch
+            onClick={() => setOpeningProfile(true)}
             className="flex min-w-0 items-center gap-3 rounded-2xl text-left transition active:opacity-80"
             aria-label="Open profile"
+            aria-busy={openingProfile || undefined}
           >
             <div className="relative size-10 shrink-0 overflow-hidden rounded-full bg-surface p-0.5">
               <div className="relative size-full overflow-hidden rounded-full bg-cream">
@@ -364,6 +372,14 @@ export function DashboardClient({
                   sizes="36px"
                   unoptimized={Boolean(profile.avatar_url)}
                 />
+                {openingProfile ? (
+                  <div
+                    className="absolute inset-0 z-10 flex items-center justify-center bg-black/40"
+                    aria-hidden
+                  >
+                    <SpinnerIcon size={18} className="text-white" />
+                  </div>
+                ) : null}
               </div>
             </div>
             <p className="truncate text-base font-semibold text-ink">

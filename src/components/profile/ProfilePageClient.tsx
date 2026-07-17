@@ -158,7 +158,7 @@ export function ProfilePageClient() {
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center px-4 py-16">
-        <p className="text-sm text-[rgba(28,22,16,0.55)]">Loading profile…</p>
+        <SpinnerIcon size={22} className="text-gold" />
       </div>
     );
   }

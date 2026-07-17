@@ -143,6 +143,10 @@ const CELEBRATE_LABEL_FADE_MS = 500;
 const WASH_COLOR = "#fdefd6";
 const DELETE_WASH_MS = 1000;
 const DELETE_REVEAL_MS = 300;
+/** DELETED label: fade in → hold; total up-time before card fade is 1.5s. */
+const DELETE_LABEL_FADE_MS = CELEBRATE_LABEL_FADE_MS;
+/** Hold after fade-in so fade-in + hold = 1.5s. */
+const DELETE_LABEL_HOLD_MS = 1000;
 const DELETE_WASH_COLOR = "#ffcdd2";
 const DELETE_STRIP_COLOR = "#e57373";
 const DELETE_STRIP_W = 64;
@@ -373,23 +377,29 @@ function DeleteRitual({
   closing,
   busy,
   onConfirm,
+  onCancel,
   onCloseComplete,
 }: {
   active: boolean;
   closing?: boolean;
   busy?: boolean;
   onConfirm: () => void | Promise<void>;
+  /** Shown above the pink track, under the deep-red swipe strip. */
+  onCancel?: () => void;
   onCloseComplete?: () => void;
 }) {
   const [washOn, setWashOn] = useState(false);
   const [ready, setReady] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const [deleted, setDeleted] = useState(false);
+  const [deletedLabelOn, setDeletedLabelOn] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLParagraphElement>(null);
   const onCloseCompleteRef = useRef(onCloseComplete);
   onCloseCompleteRef.current = onCloseComplete;
+  const onConfirmRef = useRef(onConfirm);
+  onConfirmRef.current = onConfirm;
   const [labelLeft, setLabelLeft] = useState<number | null>(null);
   const [offset, setOffset] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -397,6 +407,7 @@ function DeleteRitual({
   const startOffset = useRef(0);
   const offsetRef = useRef(0);
   const draggingRef = useRef(false);
+  const confirmStartedRef = useRef(false);
 
   useEffect(() => {
     if (active) return;
@@ -404,18 +415,22 @@ function DeleteRitual({
     setReady(false);
     setRevealed(false);
     setDeleted(false);
+    setDeletedLabelOn(false);
     setOffset(0);
     setLabelLeft(null);
     offsetRef.current = 0;
+    confirmStartedRef.current = false;
   }, [active]);
 
   useEffect(() => {
     if (!active || closing) return;
     setRevealed(false);
     setDeleted(false);
+    setDeletedLabelOn(false);
     setOffset(0);
     setLabelLeft(null);
     offsetRef.current = 0;
+    confirmStartedRef.current = false;
     const raf = window.requestAnimationFrame(() => setWashOn(true));
     const tReady = window.setTimeout(() => setReady(true), DELETE_WASH_MS);
     return () => {
@@ -498,6 +513,35 @@ function DeleteRitual({
     setHandleOffset(next);
   }
 
+  useEffect(() => {
+    if (!deleted) {
+      setDeletedLabelOn(false);
+      return;
+    }
+
+    // Fade in DELETED, hold, then confirm — label stays up and fades with the card.
+    const raf = window.requestAnimationFrame(() => setDeletedLabelOn(true));
+    const tConfirm = window.setTimeout(() => {
+      if (confirmStartedRef.current) return;
+      confirmStartedRef.current = true;
+      void (async () => {
+        try {
+          await onConfirmRef.current();
+        } catch {
+          confirmStartedRef.current = false;
+          setDeleted(false);
+          setDeletedLabelOn(false);
+          setHandleOffset(0);
+        }
+      })();
+    }, DELETE_LABEL_FADE_MS + DELETE_LABEL_HOLD_MS);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(tConfirm);
+    };
+  }, [deleted]);
+
   async function end() {
     if (!draggingRef.current) return;
     draggingRef.current = false;
@@ -508,12 +552,6 @@ function DeleteRitual({
     if (current >= threshold) {
       setHandleOffset(limit);
       setDeleted(true);
-      try {
-        await onConfirm();
-      } catch {
-        setDeleted(false);
-        setHandleOffset(0);
-      }
     } else {
       setHandleOffset(0);
     }
@@ -547,11 +585,13 @@ function DeleteRitual({
           <div className="relative flex h-full">
             <div
               ref={contentRef}
-              className="relative min-w-0 flex-1"
+              className="relative z-0 min-w-0 flex-1"
               style={{
-                background: "rgba(255, 205, 210, 0.55)",
-                opacity: revealed ? 1 : 0,
-                transition: `opacity ${DELETE_REVEAL_MS}ms ${EASE}`,
+                background: deleted
+                  ? DELETE_STRIP_COLOR
+                  : "rgba(255, 205, 210, 0.55)",
+                opacity: revealed || deleted ? 1 : 0,
+                transition: `opacity ${DELETE_REVEAL_MS}ms ${EASE}, background ${DELETE_REVEAL_MS}ms ${EASE}`,
               }}
             >
               {!deleted ? (
@@ -571,113 +611,136 @@ function DeleteRitual({
                 </p>
               ) : null}
             </div>
-            {!deleted ? (
-              <div
-                className={`absolute left-0 top-0 bottom-0 z-10 flex touch-none ${
-                  revealed && !closing
-                    ? "cursor-grab active:cursor-grabbing"
-                    : "pointer-events-none"
-                }`}
-                style={{
-                  width: DELETE_STRIP_W + offset + DELETE_SWIPE_TAB_W,
-                  transform: revealed ? "translateX(0)" : "translateX(-100%)",
-                  transition: chromeTransition,
-                }}
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.currentTarget.setPointerCapture(e.pointerId);
-                  begin(e.clientX);
-                }}
-                onPointerMove={(e) => {
-                  if (!draggingRef.current) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  move(e.clientX);
-                }}
-                onPointerUp={(e) => {
-                  if (!draggingRef.current) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  void end();
-                }}
-                onPointerCancel={(e) => {
-                  if (!draggingRef.current) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  void end();
-                }}
-              >
-                <div className="pointer-events-none absolute left-0 top-0 bottom-0 z-20 flex w-16 items-center justify-center">
-                  <TrashIcon size={24} className="text-white" />
+            {/* Cancel in the trash slot (bottom). No rewards here — they'd
+                sit on top of the translucent pink confirm track. */}
+            {onCancel && !deleted && !closing ? (
+              <div className="absolute top-0 right-0 z-[5] flex min-h-[82px] flex-col items-end justify-end gap-1.5 py-3 pr-3">
+                <div className="flex items-center gap-1.5">
+                  <CircleIconButton
+                    label="Cancel remove"
+                    tone="red"
+                    disabled={busy}
+                    onClick={onCancel}
+                  >
+                    <CloseIcon size={14} />
+                  </CircleIconButton>
                 </div>
-                <div
-                  className="relative box-border h-full shrink-0"
-                  style={{
-                    width: DELETE_SIDEBAR_BODY_W,
-                    background: DELETE_STRIP_COLOR,
-                  }}
-                >
+              </div>
+            ) : null}
+            {/* Keep the deep-red swipe panel at full width after confirm —
+                do not snap back to the rest strip. */}
+            <div
+              className={`absolute left-0 top-0 bottom-0 z-10 flex touch-none ${
+                revealed && !closing && !deleted
+                  ? "cursor-grab active:cursor-grabbing"
+                  : "pointer-events-none"
+              }`}
+              style={{
+                width: deleted
+                  ? "100%"
+                  : DELETE_STRIP_W + offset + DELETE_SWIPE_TAB_W,
+                transform: revealed || deleted ? "translateX(0)" : "translateX(-100%)",
+                transition: deleted
+                  ? `width ${DELETE_REVEAL_MS}ms ${EASE}`
+                  : chromeTransition,
+                background: DELETE_STRIP_COLOR,
+              }}
+              onPointerDown={(e) => {
+                if (deleted) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                begin(e.clientX);
+              }}
+              onPointerMove={(e) => {
+                if (deleted || !draggingRef.current) return;
+                e.preventDefault();
+                e.stopPropagation();
+                move(e.clientX);
+              }}
+              onPointerUp={(e) => {
+                if (deleted || !draggingRef.current) return;
+                e.preventDefault();
+                e.stopPropagation();
+                void end();
+              }}
+              onPointerCancel={(e) => {
+                if (deleted || !draggingRef.current) return;
+                e.preventDefault();
+                e.stopPropagation();
+                void end();
+              }}
+            >
+              {!deleted ? (
+                <>
+                  <div className="pointer-events-none absolute left-0 top-0 bottom-0 z-20 flex w-16 items-center justify-center">
+                    <TrashIcon size={24} className="text-white" />
+                  </div>
                   <div
-                    aria-hidden
-                    className="pointer-events-none absolute right-0 top-0 bottom-0 w-px"
+                    className="relative box-border h-full shrink-0"
                     style={{
-                      backgroundImage: `repeating-linear-gradient(
-                        to bottom,
-                        rgba(255, 205, 210, 0.85) 0,
-                        rgba(255, 205, 210, 0.85) ${DELETE_SIDEBAR_DASH_LEN_PX}px,
-                        transparent ${DELETE_SIDEBAR_DASH_LEN_PX}px,
-                        transparent ${DELETE_SIDEBAR_DASH_LEN_PX + DELETE_SIDEBAR_DASH_GAP_PX}px
-                      )`,
+                      width: DELETE_SIDEBAR_BODY_W,
+                      background: DELETE_STRIP_COLOR,
+                    }}
+                  >
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute right-0 top-0 bottom-0 w-px"
+                      style={{
+                        backgroundImage: `repeating-linear-gradient(
+                          to bottom,
+                          rgba(255, 205, 210, 0.85) 0,
+                          rgba(255, 205, 210, 0.85) ${DELETE_SIDEBAR_DASH_LEN_PX}px,
+                          transparent ${DELETE_SIDEBAR_DASH_LEN_PX}px,
+                          transparent ${DELETE_SIDEBAR_DASH_LEN_PX + DELETE_SIDEBAR_DASH_GAP_PX}px
+                        )`,
+                      }}
+                    />
+                  </div>
+                  <div
+                    className="h-full shrink-0"
+                    style={{
+                      width: offset,
+                      background: DELETE_STRIP_COLOR,
                     }}
                   />
-                </div>
-                <div
-                  className="h-full shrink-0"
-                  style={{
-                    width: offset,
-                    background: DELETE_STRIP_COLOR,
-                  }}
-                />
-                <div
-                  aria-hidden
-                  className="pointer-events-none flex h-full shrink-0 items-center justify-center px-2 text-white"
-                  style={{
-                    width: DELETE_SWIPE_TAB_W,
-                    background: DELETE_STRIP_COLOR,
-                  }}
-                >
-                  <svg
-                    width="8"
-                    height="12"
-                    viewBox="0 0 8 12"
-                    fill="none"
+                  <div
                     aria-hidden
+                    className="pointer-events-none flex h-full shrink-0 items-center justify-center px-2 text-white"
+                    style={{
+                      width: DELETE_SWIPE_TAB_W,
+                      background: DELETE_STRIP_COLOR,
+                    }}
                   >
-                    <path
-                      d="M1 1l5 5-5 5"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
-              </div>
-            ) : (
-              <div
-                className="absolute left-0 top-0 bottom-0 flex w-16 items-center justify-center"
-                style={{
-                  background: DELETE_STRIP_COLOR,
-                }}
-              >
-                <TrashIcon size={24} className="text-white" />
-              </div>
-            )}
+                    <svg
+                      width="8"
+                      height="12"
+                      viewBox="0 0 8 12"
+                      fill="none"
+                      aria-hidden
+                    >
+                      <path
+                        d="M1 1l5 5-5 5"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
           {deleted ? (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <p className="text-sm font-semibold uppercase tracking-[0.28em] text-[#b71c1c]">
+            <div
+              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+              style={{
+                opacity: deletedLabelOn ? 1 : 0,
+                transition: `opacity ${DELETE_LABEL_FADE_MS}ms ease`,
+              }}
+            >
+              <p className="text-base font-semibold uppercase tracking-[0.28em] text-white">
                 Deleted
               </p>
             </div>
@@ -1530,7 +1593,7 @@ function ExpandingBody({
 
     if (!detailsOpen) {
       wasExpandedRef.current = false;
-      setMaxH(COLLAPSED_BODY_H);
+      setMaxH((h) => (h === COLLAPSED_BODY_H ? h : COLLAPSED_BODY_H));
       return;
     }
 
@@ -1539,7 +1602,7 @@ function ExpandingBody({
     // Instant morph exit, or already open — sync height only (no collapse jump).
     if (expandInstant || wasExpandedRef.current) {
       wasExpandedRef.current = true;
-      setMaxH(target);
+      setMaxH((h) => (h === target ? h : target));
       return;
     }
 
@@ -1652,6 +1715,10 @@ export function TaskCard({
   const [logRevealed, setLogRevealed] = useState(false);
   const logFlipBusy = useRef(false);
   const removeDoneRef = useRef(false);
+  const onRemoveFadeStartRef = useRef(onRemoveFadeStart);
+  const onRemoveDoneRef = useRef(onRemoveDone);
+  onRemoveFadeStartRef.current = onRemoveFadeStart;
+  onRemoveDoneRef.current = onRemoveDone;
   const cardRef = useRef<HTMLElement | null>(null);
   const editMorphTimers = useRef<number[]>([]);
   /** View chrome opacity while morphing into/out of edit. */
@@ -1791,15 +1858,15 @@ export function TaskCard({
       return;
     }
     setRemoveFading(true);
-    onRemoveFadeStart?.();
+    onRemoveFadeStartRef.current?.();
     const t = window.setTimeout(() => {
       if (!removeDoneRef.current) {
         removeDoneRef.current = true;
-        onRemoveDone?.();
+        onRemoveDoneRef.current?.();
       }
     }, CELEBRATE_FADE_MS);
     return () => window.clearTimeout(t);
-  }, [removing, onRemoveFadeStart, onRemoveDone]);
+  }, [removing]);
 
   const {
     phase,
@@ -2205,14 +2272,8 @@ export function TaskCard({
     novelTaskNoRef.current = null;
     novelSnapshotRef.current = null;
     novelModifiedRef.current = false;
-    if (
-      catalogMatch.detail_title ||
-      catalogMatch.detail_lead ||
-      catalogMatch.detail_aim ||
-      catalogMatch.detail_body
-    ) {
-      setAdvanceOpen(true);
-    }
+    // Stay in Basic view so EXP/gem/icon remain editable without flipping to Advance.
+    setAdvanceOpen(false);
   }
 
   async function saveEdit() {
@@ -2299,14 +2360,15 @@ export function TaskCard({
           closing={deleteClosing}
           busy={busy}
           onCloseComplete={finishDeleteClose}
+          onCancel={cancelDelete}
           onConfirm={async () => {
             await onRemove?.();
           }}
         />
-        {canParentEdit ? (
+        {canParentEdit && !(deleteRitual && !deleteClosing) ? (
           <div className="absolute top-0 right-0 z-30 flex h-[82px] flex-col items-end justify-start gap-1.5 py-3 pr-3">
             <div className="flex items-center gap-1.5">
-              {onUpdate && !showDeleteChrome ? (
+              {onUpdate ? (
                 <CircleIconButton
                   label="Edit task"
                   tone="purple"
@@ -2318,22 +2380,12 @@ export function TaskCard({
               ) : null}
               {onRemove ? (
                 <CircleIconButton
-                  label={
-                    showDeleteChrome
-                      ? "Cancel remove"
-                      : "Remove task for mentee"
-                  }
+                  label="Remove task for mentee"
                   tone="red"
                   disabled={busy || deleteClosing}
-                  onClick={() =>
-                    showDeleteChrome ? cancelDelete() : beginDelete()
-                  }
+                  onClick={beginDelete}
                 >
-                  {showDeleteChrome ? (
-                    <CloseIcon size={14} />
-                  ) : (
-                    <TrashIcon size={14} />
-                  )}
+                  <TrashIcon size={14} />
                 </CircleIconButton>
               ) : null}
             </div>
@@ -2425,6 +2477,7 @@ export function TaskCard({
         closing={deleteClosing}
         busy={busy}
         onCloseComplete={finishDeleteClose}
+        onCancel={cancelDelete}
         onConfirm={async () => {
           await onRemove?.();
         }}
@@ -2440,16 +2493,25 @@ export function TaskCard({
         }}
         aria-hidden={celebrateContentGone || undefined}
       >
-        {/* Fixed top-right rail; expanded body uses the space underneath */}
+        {/* Fixed top-right rail. Hidden only while delete swipe is active
+            (not while cancel-closing) so chrome snaps back with no fade. */}
         <div
           className="absolute top-0 right-0 z-30 flex min-h-[82px] flex-col items-end justify-between gap-1.5 py-3 pr-3"
           style={
-            creating
-              ? createContentRevealStyle(createContentRevealed)
-              : editing
-                ? editMorphFadeStyle(editFade)
-                : editMorphFadeStyle(viewFade, EDIT_MORPH_FADE_MS)
+            deleteRitual && !deleteClosing
+              ? { opacity: 0, transition: "none", pointerEvents: "none" }
+              : creating
+                ? createContentRevealStyle(createContentRevealed)
+                : editing
+                  ? editMorphFadeStyle(editFade)
+                  : {
+                      ...editMorphFadeStyle(viewFade, EDIT_MORPH_FADE_MS),
+                      ...(deleteClosing
+                        ? { opacity: 1, transition: "none" }
+                        : {}),
+                    }
           }
+          aria-hidden={deleteRitual && !deleteClosing ? true : undefined}
         >
           {editing ? (
             <div className="flex flex-col items-end gap-1.5">
@@ -2495,19 +2557,15 @@ export function TaskCard({
           ) : (
             <>
               <div
-                className={
-                  showDeleteChrome || !showRewards
-                    ? "pointer-events-none invisible"
-                    : undefined
-                }
-                aria-hidden={showDeleteChrome || !showRewards || undefined}
+                className={!showRewards ? "pointer-events-none invisible" : undefined}
+                aria-hidden={!showRewards || undefined}
               >
                 {showRewards ? (
                   <Rewards exp={task.exp} gem={task.gem} />
                 ) : null}
               </div>
               <div className="flex items-center gap-1.5">
-                {canParentEdit && onUpdate && !showDeleteChrome ? (
+                {canParentEdit && onUpdate ? (
                   <CircleIconButton
                     label="Edit task"
                     tone="purple"
@@ -2519,22 +2577,12 @@ export function TaskCard({
                 ) : null}
                 {canParentEdit && onRemove && !creating ? (
                   <CircleIconButton
-                    label={
-                      showDeleteChrome
-                        ? "Cancel remove"
-                        : "Remove task for mentee"
-                    }
+                    label="Remove task for mentee"
                     tone="red"
                     disabled={busy || deleteClosing}
-                    onClick={() =>
-                      showDeleteChrome ? cancelDelete() : beginDelete()
-                    }
+                    onClick={beginDelete}
                   >
-                    {showDeleteChrome ? (
-                      <CloseIcon size={14} />
-                    ) : (
-                      <TrashIcon size={14} />
-                    )}
+                    <TrashIcon size={14} />
                   </CircleIconButton>
                 ) : null}
                 {showAction ? (
