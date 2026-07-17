@@ -565,6 +565,7 @@ export function DashboardClient({
         canEdit={!profile.is_child}
         menteeUserId={subjectIds[0] ?? null}
         milestones={pathMilestones}
+        currentGems={gems}
         onSaved={(next) => {
           setPathMilestones(next);
           router.refresh();

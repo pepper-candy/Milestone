@@ -1,6 +1,6 @@
 "use client";
 
-import { GemIcon } from "@/components/ui/Icons";
+import { GemIcon, SparkIcon } from "@/components/ui/Icons";
 import { notifyFamilySync } from "@/lib/family-sync";
 import type { PrizePathStopInput } from "@/lib/prize-path";
 import type { Milestone } from "@/types";
@@ -19,6 +19,8 @@ type PrizePathEditorProps = {
   canEdit: boolean;
   menteeUserId: string | null;
   milestones: Milestone[];
+  /** Current mentee gem balance — used for unlocked styling in read-only view. */
+  currentGems?: number;
   onSaved: (milestones: Milestone[]) => void;
 };
 
@@ -79,6 +81,9 @@ const gemInputClass = `${inputClass} text-left font-semibold tabular-nums [appea
 const EDIT_LIST_MAX_H =
   "max-h-[calc(6*1.875rem+5*0.375rem+0.75rem)]";
 
+/** Read-only prize cards (~57px) + space-y-2 gaps — 6 visible by default. */
+const READ_LIST_MAX_H = "max-h-[calc(6*3.5625rem+5*0.5rem)]";
+
 const SHEET_EXIT_MS = 320;
 const SHEET_MAX_VH = 0.85;
 
@@ -94,17 +99,35 @@ function remPx(): number {
   );
 }
 
-/** Sheet height that shows chrome + table header + exactly one stop row. */
-function oneRowSheetHeight(measuredSheetH: number, visibleRows: number): number {
+type RowMetrics = { rowRem: number; gapRem: number; padRem: number };
+
+const EDIT_ROW: RowMetrics = { rowRem: 1.875, gapRem: 0.375, padRem: 0.75 };
+const READ_ROW: RowMetrics = { rowRem: 3.5625, gapRem: 0.5, padRem: 0 };
+
+/** Sheet height that shows chrome + exactly one list row. */
+function oneRowSheetHeight(
+  measuredSheetH: number,
+  visibleRows: number,
+  metrics: RowMetrics = EDIT_ROW,
+): number {
   const rem = remPx();
-  const rowH = 1.875 * rem;
-  const gap = 0.375 * rem;
-  const listPad = 0.75 * rem;
+  const rowH = metrics.rowRem * rem;
+  const gap = metrics.gapRem * rem;
+  const listPad = metrics.padRem * rem;
   const rows = Math.max(1, visibleRows);
   const listBodyH = listPad + rows * rowH + Math.max(0, rows - 1) * gap;
   const oneRowListH = listPad + rowH;
   return Math.round(
     Math.max(oneRowListH + rem * 8, measuredSheetH - (listBodyH - oneRowListH)),
+  );
+}
+
+function sixRowListHeight(metrics: RowMetrics): number {
+  const rem = remPx();
+  return Math.round(
+    metrics.padRem * rem +
+      6 * metrics.rowRem * rem +
+      5 * metrics.gapRem * rem,
   );
 }
 
@@ -114,6 +137,7 @@ export function PrizePathEditor({
   canEdit,
   menteeUserId,
   milestones,
+  currentGems = 0,
   onSaved,
 }: PrizePathEditorProps) {
   const [drafts, setDrafts] = useState<DraftStop[]>(() =>
@@ -169,11 +193,17 @@ export function PrizePathEditor({
     const el = sheetRef.current;
     if (!el) return;
     const measured = Math.round(el.getBoundingClientRect().height);
+    const metrics = canEdit ? EDIT_ROW : READ_ROW;
     const visibleRows =
       drafts.length === 0 ? 1 : Math.min(6, Math.max(1, drafts.length));
-    const minH = oneRowSheetHeight(measured, visibleRows);
+    const minH = oneRowSheetHeight(measured, visibleRows, metrics);
     minHeightRef.current = minH;
-    const next = Math.min(sheetMaxHeight(), Math.max(minH, measured));
+    // Cap default open height to chrome + at most 6 rows (list max-h already
+    // applied; clamp protects if measure runs before layout settles).
+    const sixList = sixRowListHeight(metrics);
+    const chrome = Math.max(0, measured - sixList);
+    const capped = Math.min(measured, chrome + sixList);
+    const next = Math.min(sheetMaxHeight(), Math.max(minH, capped));
     heightRef.current = next;
     setSheetHeight(next);
   }, [mounted, exiting, sheetHeight, drafts.length, canEdit]);
@@ -320,33 +350,30 @@ export function PrizePathEditor({
       : "height 0.22s cubic-bezier(0.32, 0.72, 0, 1)";
 
   return (
-    <div
-      className={`fixed inset-0 z-50 mx-auto max-w-[475px] ${
-        exiting ? "pointer-events-none" : ""
-      }`}
-    >
+    <>
       <button
         type="button"
         aria-label="Close prize path editor"
-        className={`absolute inset-0 bg-[rgba(28,22,16,0.35)] ${
-          exiting ? "animate-backdrop-fade-out" : "animate-backdrop-fade-in"
+        className={`fixed inset-0 z-50 bg-transparent ${
+          exiting ? "pointer-events-none" : ""
         }`}
         onClick={onClose}
       />
-      <div
-        ref={sheetRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={canEdit ? "Prize Path Editor" : "Prize path"}
-        className={`${sheetShellClass} ${
-          exiting ? "animate-sheet-slide-down" : "animate-sheet-slide-up"
-        }`}
-        style={{
-          height: sheetHeight ?? undefined,
-          maxHeight: `${SHEET_MAX_VH * 100}vh`,
-          transition: sheetTransition,
-        }}
-      >
+      <div className="pointer-events-none fixed inset-0 z-50 mx-auto max-w-[475px]">
+        <div
+          ref={sheetRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={canEdit ? "Prize Path Editor" : "Prize Path"}
+          className={`${sheetShellClass} pointer-events-auto ${
+            exiting ? "animate-sheet-slide-down" : "animate-sheet-slide-up"
+          }`}
+          style={{
+            height: sheetHeight ?? undefined,
+            maxHeight: `${SHEET_MAX_VH * 100}vh`,
+            transition: sheetTransition,
+          }}
+        >
         <div
           role="separator"
           aria-orientation="horizontal"
@@ -365,8 +392,11 @@ export function PrizePathEditor({
         </div>
 
         <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-ink">
-            {canEdit ? "Prize Path Editor" : "Prize path"}
+          <h2 className="flex min-w-0 items-center gap-1 text-base font-semibold text-ink">
+            <SparkIcon size={18} className="shrink-0 text-gold" />
+            <span className="truncate">
+              {canEdit ? "Prize Path Editor" : "Prize Path"}
+            </span>
           </h2>
           <button
             type="button"
@@ -463,25 +493,35 @@ export function PrizePathEditor({
           ) : (
             <div
               className={`min-h-0 space-y-2 overflow-y-auto ${
-                heightLocked ? "flex-1" : EDIT_LIST_MAX_H
+                heightLocked ? "flex-1" : READ_LIST_MAX_H
               }`}
             >
-              {drafts.map((d) => (
-                <div
-                  key={d.key}
-                  className="flex items-center gap-2 rounded-2xl border border-[rgba(200,146,42,0.15)] bg-[rgba(255,250,242,0.9)] px-3 py-2.5"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-ink">
+              {drafts.map((d) => {
+                const threshold = Math.floor(Number(d.gem_threshold)) || 0;
+                const unlocked = currentGems >= threshold && threshold > 0;
+                return (
+                  <div
+                    key={d.key}
+                    className={`flex items-center gap-2 rounded-2xl border px-3 py-2.5 ${
+                      unlocked
+                        ? "border-[rgba(168,196,160,0.9)] bg-[rgba(168,196,160,0.12)]"
+                        : "border-[rgba(200,146,42,0.15)] bg-[rgba(255,250,242,0.9)]"
+                    }`}
+                  >
+                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
                       {d.prize_name || "Prize"}
                     </p>
-                    <p className="flex items-center gap-1 text-xs tabular-nums text-[#7b68ee]">
+                    <p
+                      className={`flex shrink-0 items-center gap-1 text-xs tabular-nums ${
+                        unlocked ? "text-[#5a7a52]" : "text-[#7b68ee]"
+                      }`}
+                    >
                       <GemIcon size={12} />
-                      {d.gem_threshold} gems
+                      {d.gem_threshold}
                     </p>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -576,6 +616,7 @@ export function PrizePathEditor({
           </div>
         ) : null}
       </div>
-    </div>
+      </div>
+    </>
   );
 }

@@ -281,7 +281,6 @@ function CompletionRitual({
 }) {
   const [washOn, setWashOn] = useState(false);
   const [labelOn, setLabelOn] = useState(false);
-  const [washClear, setWashClear] = useState(false);
   const [cardFade, setCardFade] = useState(false);
   const doneRef = useRef(false);
   const onContentHideRef = useRef(onContentHide);
@@ -295,7 +294,6 @@ function CompletionRitual({
     if (!active) {
       setWashOn(false);
       setLabelOn(false);
-      setWashClear(false);
       setCardFade(false);
       doneRef.current = false;
       return;
@@ -308,9 +306,9 @@ function CompletionRitual({
       setLabelOn(true);
     }, CELEBRATE_WASH_MS);
 
-    // At 2s: drop wash + card chrome; COMPLETED stays alone on the box.
+    // At 2s: hide card chrome under the still-opaque wash so COMPLETED
+    // sits alone — never fade the wash early (that flashes rewards/claim).
     const tContent = window.setTimeout(() => {
-      setWashClear(true);
       onContentHideRef.current?.();
     }, CELEBRATE_CONTENT_HIDE_MS);
 
@@ -341,16 +339,16 @@ function CompletionRitual({
     <>
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-20 origin-top"
+        className="pointer-events-none absolute inset-0 z-40 origin-top"
         style={{
           background: WASH_COLOR,
           transform: washOn ? "scaleY(1)" : "scaleY(0)",
-          transition: `transform ${CELEBRATE_WASH_MS}ms ${EASE}, opacity ${CELEBRATE_LABEL_FADE_MS}ms ease`,
-          opacity: washClear || cardFade ? 0 : 1,
+          transition: `transform ${CELEBRATE_WASH_MS}ms ${EASE}, opacity ${CELEBRATE_FADE_MS}ms ease`,
+          opacity: cardFade ? 0 : 1,
         }}
       />
       <div
-        className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+        className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center"
         style={{
           opacity: cardFade ? 0 : labelOn ? 1 : 0,
           transition: `opacity ${
@@ -2484,9 +2482,8 @@ export function TaskCard({
       <div
         style={{
           opacity: celebrateContentGone ? 0 : 1,
-          transition: celebrate
-            ? `opacity ${CELEBRATE_LABEL_FADE_MS}ms ease`
-            : undefined,
+          // Instant hide under the opaque wash — a fade here flashes chrome.
+          transition: undefined,
           pointerEvents: celebrateContentGone ? "none" : undefined,
         }}
         aria-hidden={celebrateContentGone || undefined}

@@ -442,6 +442,8 @@ function partitionTasks(
   sessionLogs: SessionLogItem[],
   celebratingIds: Set<string>,
   removingIds: Set<string>,
+  /** Local tombstones so a stale refresh cannot resurrect a card mid-fade. */
+  removedLockIds: Set<string>,
 ) {
   const byTaskId = new Map(userTasks.map((ut) => [ut.task_id, ut]));
   const assignedTasks = tasks.filter((task) => byTaskId.has(task.id));
@@ -455,8 +457,11 @@ function partitionTasks(
 
   for (const task of assignedTasks) {
     const ut = byTaskId.get(task.id)!;
+    const effectivelyRemoved =
+      ut.status === "removed" || removedLockIds.has(task.id);
+
     // Hide mentee-removed assignments, except while the delete fade/collapse runs.
-    if (ut?.status === "removed" && !removingIds.has(task.id)) continue;
+    if (effectivelyRemoved && !removingIds.has(task.id)) continue;
 
     const unlocked = isTaskUnlocked(task, prereqStats, knownTaskNos);
 
@@ -477,7 +482,7 @@ function partitionTasks(
     }
 
     // Keep removing cards in their prior section until collapse finishes.
-    if (ut?.status === "removed" && removingIds.has(task.id)) {
+    if (effectivelyRemoved && removingIds.has(task.id)) {
       if (unlocked) yourTasks.push(task);
       else lockedTasks.push(task);
       continue;
@@ -531,6 +536,10 @@ export function TaskList({
     () => new Set(),
   );
   const [removingIds, setRemovingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  /** Keep removed cards gone even if a stale RSC refresh briefly returns old status. */
+  const [removedLockIds, setRemovedLockIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [collapsingIds, setCollapsingIds] = useState<Set<string>>(
@@ -609,7 +618,27 @@ export function TaskList({
       sessionLogs,
       celebratingIds,
       removingIds,
+      removedLockIds,
     );
+
+  // Drop tombstones once props agree and the fade slot is gone.
+  useEffect(() => {
+    setRemovedLockIds((prev) => {
+      if (prev.size === 0) return prev;
+      const byId = new Map(userTasks.map((ut) => [ut.task_id, ut]));
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of prev) {
+        if (removingIds.has(id)) continue;
+        const ut = byId.get(id);
+        if (!ut || ut.status === "removed") {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [userTasks, removingIds]);
 
   const finishedVisible = renderSessions
     ? finished
@@ -735,12 +764,19 @@ export function TaskList({
         alert(data.error || "Remove failed");
         return;
       }
+      // Refresh first while DELETED overlay is still up, then fade. A local
+      // tombstone blocks stale RSC props from flashing the card back.
+      await onChanged?.();
+      setRemovedLockIds((prev) => {
+        const next = new Set(prev);
+        next.add(task.id);
+        return next;
+      });
       setRemovingIds((prev) => {
         const next = new Set(prev);
         next.add(task.id);
         return next;
       });
-      await onChanged?.();
       const childId = userTask?.user_id;
       if (childId) void notifyFamilySync(childId, "tasks");
     } finally {
