@@ -684,7 +684,7 @@ export async function POST(request: Request) {
       exp: patch.exp ?? 0,
       gem: patch.gem ?? 0,
       requires_proof: patch.requires_proof ?? false,
-      icon_key: patch.icon_key ?? "target",
+      icon_key: patch.icon_key?.trim() || "target",
       detail_title: patch.detail_title ?? null,
       detail_lead: patch.detail_lead ?? null,
       detail_aim: patch.detail_aim ?? null,

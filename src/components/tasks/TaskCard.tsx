@@ -184,7 +184,8 @@ function defaultIconKeyForTask(task: Task): TaskIconKey {
     default: {
       const no = task.task_no.toLowerCase();
       if (no.startsWith("math") || no.includes("goal")) return "target";
-      return "book";
+      // Custom / Add New Task cards default to target (same as composer).
+      return "target";
     }
   }
 }
@@ -872,35 +873,11 @@ function TaskGlyph({
     return <CheckIcon size={22} className="text-gold" />;
   }
 
-  const preferred = iconOverride ?? task.icon_key;
-  if (preferred) {
-    const keyed = <GlyphByKey iconKey={preferred} />;
-    if (keyed) return keyed;
-  }
-
-  const kind = categoryKeyForTask(task);
-  const iconClass = "text-gold";
-
-  switch (kind) {
-    case "community":
-      return <FootprintsIcon size={24} className={iconClass} />;
-    case "eng_speak":
-      return <MicIcon size={24} className={iconClass} />;
-    case "eng_vocab":
-      return <SparkIcon size={24} className={iconClass} />;
-    case "eng_writing":
-      return <BookIcon size={24} className={iconClass} />;
-    case "math_consolidation":
-    case "math_prelearning":
-      return <TargetIcon size={24} className={iconClass} />;
-    default: {
-      const no = task.task_no.toLowerCase();
-      if (no.startsWith("math") || no.includes("goal")) {
-        return <TargetIcon size={24} className={iconClass} />;
-      }
-      return <BookIcon size={24} className={iconClass} />;
-    }
-  }
+  const preferred =
+    iconOverride ?? task.icon_key ?? defaultIconKeyForTask(task);
+  return (
+    <GlyphByKey iconKey={preferred} size={24} className="text-gold" />
+  );
 }
 
 function Rewards({ exp, gem }: { exp: number; gem: number }) {
@@ -2264,7 +2241,7 @@ export function TaskCard({
       description: emptyToNull(draft.description ?? ""),
       exp: draft.exp,
       gem: draft.gem,
-      icon_key: draft.icon_key,
+      icon_key: draft.icon_key ?? "target",
       detail_title: emptyToNull(draft.detail_title ?? ""),
       detail_lead: emptyToNull(draft.detail_lead ?? ""),
       detail_aim,
