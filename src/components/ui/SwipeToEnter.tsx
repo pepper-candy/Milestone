@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -7,10 +7,14 @@ type SwipeToEnterProps = {
   disabled?: boolean;
   loading?: boolean;
   successLabel?: string;
+  /** Compact track for in-card rituals (e.g. swipe to delete). */
+  compact?: boolean;
+  /** Visual theme; delete uses a red track + white thumb. */
+  variant?: "default" | "delete";
   onComplete: () => void | Promise<void>;
 };
 
-/** Gap between resting thumb and the label’s left edge. */
+/** Gap between resting thumb and the label's left edge. */
 const LABEL_THUMB_GAP = 12;
 
 export function SwipeToEnter({
@@ -18,6 +22,8 @@ export function SwipeToEnter({
   disabled = false,
   loading = false,
   successLabel,
+  compact = false,
+  variant = "default",
   onComplete,
 }: SwipeToEnterProps) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -33,8 +39,11 @@ export function SwipeToEnter({
   const offsetRef = useRef(0);
   const draggingRef = useRef(false);
 
-  const handleWidth = 80;
-  const padding = 4;
+  const isDelete = variant === "delete";
+  const handleWidth = compact ? 56 : 80;
+  const padding = compact ? 3 : 4;
+  const trackH = compact ? 44 : 56;
+  const thumbH = compact ? 38 : 44;
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => setEntered(true));
@@ -117,8 +126,6 @@ export function SwipeToEnter({
       setDone(true);
       try {
         await onComplete();
-        // Soft reset so the handle never stays stuck at the end
-        // (unless a permanent successLabel is shown).
         if (!successLabel) resetHandle();
       } catch {
         resetHandle();
@@ -129,32 +136,73 @@ export function SwipeToEnter({
   }
 
   const journey = maxOffset() > 0 ? offset / maxOffset() : 0;
-  // Label fades early; handle (+ icon) fades across the full travel
   const slideLabelOpacity = Math.max(0, 1 - journey / 0.25);
   const slideHandleOpacity = Math.max(0, 1 - journey);
   const labelOpacity = entered ? slideLabelOpacity : 0;
   const handleOpacity = entered && !showSuccess ? slideHandleOpacity : 0;
 
+  const trackBg = showSuccess
+    ? isDelete
+      ? "linear-gradient(90deg, #e57373 0%, #c62828 100%)"
+      : "linear-gradient(90deg, #fcdda6 0%, #c8922a 100%)"
+    : isDelete
+      ? "linear-gradient(90deg, #ffcdd2 0%, #ef9a9a 100%)"
+      : "linear-gradient(90deg, #fcdda6 0%, #dfeef3 100%)";
+
+  const thumbBg = isDelete
+    ? "linear-gradient(151deg, #ffffff 0%, #f5f5f5 100%)"
+    : "linear-gradient(151deg, rgb(252, 221, 166) 0%, rgb(200, 146, 42) 100%)";
+
+  const thumbShadow = isDelete
+    ? "0px 2px 8px 0px rgba(198,40,40,0.35), 0px 1px 2px 0px rgba(0,0,0,0.1)"
+    : "0px 2px 8px 0px rgba(200,146,42,0.35), 0px 1px 2px 0px rgba(0,0,0,0.1)";
+
+  const chevronStroke = isDelete ? "#c62828" : "#fffaf2";
+  const labelColor = isDelete
+    ? "rgba(183, 28, 28, 0.7)"
+    : "rgba(28,22,16,0.55)";
+  const trackBorder = isDelete
+    ? "border-[rgba(198,40,40,0.28)]"
+    : "border-[rgba(200,146,42,0.2)]";
+  const trackShadow = isDelete
+    ? "shadow-[0px_2px_12px_0px_rgba(198,40,40,0.18)]"
+    : "shadow-[0px_2px_12px_0px_rgba(200,146,42,0.15)]";
+
+  const trackClassName = [
+    "relative w-full overflow-hidden rounded-full border",
+    trackBorder,
+    trackShadow,
+  ].join(" ");
+
+  const labelClassName = [
+    "pointer-events-none absolute top-0 bottom-0 flex items-center whitespace-nowrap font-semibold uppercase",
+    compact ? "text-[11px] tracking-[1.4px]" : "text-[14px] tracking-[1.96px]",
+  ].join(" ");
+
+  const successClassName = [
+    "flex h-full items-center justify-center gap-2 font-semibold uppercase text-[#fffaf2]",
+    compact ? "text-[11px] tracking-[1.4px]" : "text-[14px] tracking-[1.96px]",
+  ].join(" ");
+
   return (
     <div
       ref={trackRef}
-      className="relative h-14 w-full overflow-hidden rounded-full border border-[rgba(200,146,42,0.2)] shadow-[0px_2px_12px_0px_rgba(200,146,42,0.15)]"
+      className={trackClassName}
       style={{
-        backgroundImage: showSuccess
-          ? "linear-gradient(90deg, #fcdda6 0%, #c8922a 100%)"
-          : "linear-gradient(90deg, #fcdda6 0%, #dfeef3 100%)",
-        // Track is visual only — dragging lives on the handle button
+        height: trackH,
+        backgroundImage: trackBg,
         touchAction: "pan-y",
       }}
     >
       {!showSuccess && (
         <p
           ref={labelRef}
-          className="pointer-events-none absolute top-0 bottom-0 flex items-center whitespace-nowrap text-[14px] font-semibold uppercase tracking-[1.96px] text-[rgba(28,22,16,0.55)]"
+          className={labelClassName}
           style={{
             left: labelLeft ?? "50%",
             transform: labelLeft == null ? "translateX(-50%)" : undefined,
             opacity: labelOpacity,
+            color: labelColor,
             transition: dragging ? "none" : "opacity 0.5s ease",
           }}
         >
@@ -164,7 +212,7 @@ export function SwipeToEnter({
 
       {showSuccess ? (
         <div
-          className="flex h-full items-center justify-center gap-2 text-[14px] font-semibold uppercase tracking-[1.96px] text-[#fffaf2]"
+          className={successClassName}
           style={{ animation: "swipe-fade-in 0.5s ease both" }}
         >
           <span aria-hidden>✓</span>
@@ -175,18 +223,18 @@ export function SwipeToEnter({
           type="button"
           aria-label={label}
           disabled={disabled || loading}
-          className="absolute top-[4.77px] flex h-11 w-20 touch-none cursor-grab items-center justify-center rounded-full active:cursor-grabbing disabled:cursor-not-allowed"
+          className="absolute flex touch-none cursor-grab items-center justify-center rounded-full active:cursor-grabbing disabled:cursor-not-allowed"
           style={{
+            top: padding,
             left: padding + offset,
+            width: handleWidth,
+            height: thumbH,
             opacity: handleOpacity,
-            backgroundImage:
-              "linear-gradient(151deg, rgb(252, 221, 166) 0%, rgb(200, 146, 42) 100%)",
-            boxShadow:
-              "0px 2px 8px 0px rgba(200,146,42,0.35), 0px 1px 2px 0px rgba(0,0,0,0.1)",
+            backgroundImage: thumbBg,
+            boxShadow: thumbShadow,
             transition: dragging
               ? "none"
               : "left 0.25s ease-out, opacity 0.5s ease",
-            // Keep the track itself non-interactive for drag — only this handle moves
             pointerEvents: disabled || loading ? "none" : "auto",
           }}
           onPointerDown={(e) => {
@@ -214,7 +262,7 @@ export function SwipeToEnter({
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
             <path
               d="M7 4l6 6-6 6"
-              stroke="#fffaf2"
+              stroke={chevronStroke}
               strokeWidth="2.2"
               strokeLinecap="round"
               strokeLinejoin="round"

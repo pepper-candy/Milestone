@@ -1,4 +1,17 @@
-export type UserTaskStatus = "available" | "pending" | "verified" | "claimed";
+export type UserTaskStatus =
+  | "available"
+  | "pending"
+  | "verified"
+  | "claimed"
+  | "removed";
+
+/** Glyph keys parents can pick; null = infer from category / task_no. */
+export type TaskIconKey =
+  | "target"
+  | "book"
+  | "mic"
+  | "spark"
+  | "footprints";
 
 export interface Profile {
   id: string;
@@ -44,6 +57,16 @@ export interface Task {
   seq: number | null;
   prereq_1: string | null;
   prereq_2: string | null;
+  /** Extended prerequisite list; when set, used for locking (legacy columns synced on save). */
+  prereqs?: string[] | null;
+  /** Override glyph; null = infer from category. */
+  icon_key?: TaskIconKey | null;
+  detail_title?: string | null;
+  detail_lead?: string | null;
+  detail_aim?: string | null;
+  detail_body?: string | null;
+  /** When true, task_no is discoverable via catalog lookup. */
+  is_catalog_template?: boolean;
 }
 
 /** Ended session shown as a compact Finished log row. */

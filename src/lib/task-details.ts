@@ -114,10 +114,49 @@ export function categoryKeyForTask(
   return keyForTask(task);
 }
 
+function hasDbDetail(task: Task): boolean {
+  return Boolean(
+    (task.detail_title && task.detail_title.trim()) ||
+      (task.detail_lead && task.detail_lead.trim()) ||
+      (task.detail_aim && task.detail_aim.trim()) ||
+      (task.detail_body && task.detail_body.trim()),
+  );
+}
+
+/** Prefer parent-saved detail_* columns; else static DETAILS by category. */
 export function detailForTask(
   task: Task | undefined | null,
 ): TaskDetailBlock | null {
   if (!task) return null;
+
+  if (hasDbDetail(task)) {
+    const fallback = (() => {
+      const key = keyForTask(task);
+      return key ? DETAILS[key] : null;
+    })();
+    const fullTitle =
+      (task.detail_title && task.detail_title.trim()) ||
+      fallback?.fullTitle ||
+      task.category ||
+      task.task_no;
+    const lead =
+      (task.detail_lead && task.detail_lead.trim()) ||
+      fallback?.lead ||
+      task.description ||
+      "";
+    const aim =
+      (task.detail_aim && task.detail_aim.trim()) ||
+      fallback?.paragraphs[1] ||
+      "";
+    const bodyRaw =
+      (task.detail_body && task.detail_body.trim()) ||
+      (fallback?.paragraphs.slice(2).join("\n") ?? "");
+    const body = bodyRaw
+      ? bodyRaw.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean)
+      : [];
+    return block(fullTitle, lead, aim, body);
+  }
+
   const key = keyForTask(task);
   return key ? DETAILS[key] : null;
 }

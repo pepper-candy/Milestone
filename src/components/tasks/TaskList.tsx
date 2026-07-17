@@ -4,10 +4,17 @@ import {
   TaskCard,
   CELEBRATE_FADE_MS,
   type TaskCardAction,
+  type TaskSavePayload,
+  type TaskUpdatePatch,
 } from "@/components/tasks/TaskCard";
 import { ChevronDownIcon } from "@/components/ui/Icons";
 import { notifyFamilySync } from "@/lib/family-sync";
 import { enrichTasks } from "@/lib/task-catalog";
+import {
+  buildKnownTaskNos,
+  isTaskUnlocked,
+  unmetPrereqHints,
+} from "@/lib/task-prerequisites";
 import type { SessionLogItem, Task, UserTask } from "@/types";
 import {
   useCallback,
@@ -187,39 +194,15 @@ function seqOf(task: Task): number {
   return task.seq ?? Number.MAX_SAFE_INTEGER;
 }
 
-function normalizeNo(no: string | null | undefined): string {
-  return (no ?? "").trim().toLowerCase();
-}
-
-/** Only claimed tasks fulfill prerequisites — pending/verified do not. */
 function buildClaimedNos(tasks: Task[], userTasks: UserTask[]): Set<string> {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const claimed = new Set<string>();
   for (const ut of userTasks) {
     if (ut.status !== "claimed") continue;
     const t = byId.get(ut.task_id);
-    if (t) claimed.add(normalizeNo(t.task_no));
+    if (t) claimed.add((t.task_no ?? "").trim().toLowerCase());
   }
   return claimed;
-}
-
-function isPrereqClaimed(
-  prereq: string | null | undefined,
-  claimedNos: Set<string>,
-): boolean {
-  if (!prereq || !normalizeNo(prereq)) return true;
-  return claimedNos.has(normalizeNo(prereq));
-}
-
-function unmetPrereqHints(task: Task, claimedNos: Set<string>): string[] {
-  const hints: string[] = [];
-  for (const prereq of [task.prereq_1, task.prereq_2]) {
-    if (!prereq || !normalizeNo(prereq)) continue;
-    if (!isPrereqClaimed(prereq, claimedNos)) {
-      hints.push(`Requires ${prereq}`);
-    }
-  }
-  return hints;
 }
 
 function partitionTasks(
@@ -227,9 +210,11 @@ function partitionTasks(
   userTasks: UserTask[],
   sessionLogs: SessionLogItem[],
   celebratingIds: Set<string>,
+  removingIds: Set<string>,
 ) {
   const byTaskId = new Map(userTasks.map((ut) => [ut.task_id, ut]));
   const claimedNos = buildClaimedNos(tasks, userTasks);
+  const knownTaskNos = buildKnownTaskNos(tasks);
 
   const yourTasks: Task[] = [];
   const lockedTasks: Task[] = [];
@@ -237,9 +222,10 @@ function partitionTasks(
 
   for (const task of tasks) {
     const ut = byTaskId.get(task.id);
-    const unlocked =
-      isPrereqClaimed(task.prereq_1, claimedNos) &&
-      isPrereqClaimed(task.prereq_2, claimedNos);
+    // Hide mentee-removed assignments, except while the delete fade/collapse runs.
+    if (ut?.status === "removed" && !removingIds.has(task.id)) continue;
+
+    const unlocked = isTaskUnlocked(task, claimedNos, knownTaskNos);
 
     // Keep celebrating claimed cards in Your Tasks until the 5s ritual ends.
     if (ut?.status === "claimed" && celebratingIds.has(task.id)) {
@@ -254,6 +240,13 @@ function partitionTasks(
         task,
         userTask: ut,
       });
+      continue;
+    }
+
+    // Keep removing cards in their prior section until collapse finishes.
+    if (ut?.status === "removed" && removingIds.has(task.id)) {
+      if (unlocked) yourTasks.push(task);
+      else lockedTasks.push(task);
       continue;
     }
 
@@ -277,7 +270,7 @@ function partitionTasks(
     })),
   ].sort((a, b) => b.sortAt - a.sortAt);
 
-  return { byTaskId, claimedNos, yourTasks, lockedTasks, finished };
+  return { byTaskId, claimedNos, knownTaskNos, yourTasks, lockedTasks, finished };
 }
 
 export function TaskList({
@@ -289,6 +282,9 @@ export function TaskList({
 }: TaskListProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [celebratingIds, setCelebratingIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [removingIds, setRemovingIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [collapsingIds, setCollapsingIds] = useState<Set<string>>(
@@ -360,8 +356,14 @@ export function TaskList({
   }
 
   const tasks = useMemo(() => enrichTasks(rawTasks), [rawTasks]);
-  const { byTaskId, claimedNos, yourTasks, lockedTasks, finished } =
-    partitionTasks(tasks, userTasks, sessionLogs, celebratingIds);
+  const { byTaskId, claimedNos, knownTaskNos, yourTasks, lockedTasks, finished } =
+    partitionTasks(
+      tasks,
+      userTasks,
+      sessionLogs,
+      celebratingIds,
+      removingIds,
+    );
 
   const finishedVisible = renderSessions
     ? finished
@@ -425,6 +427,85 @@ export function TaskList({
     }, CELEBRATE_FADE_MS);
   }
 
+  function finishRemove(taskId: string) {
+    setRemovingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
+    setCollapsingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
+  }
+
+  async function handleUpdate(task: Task, patch: TaskSavePayload) {
+    setBusyId(task.id);
+    try {
+      const userTask = byTaskId.get(task.id);
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          action: "update",
+          task_id: task.id,
+          user_task_id: userTask?.id,
+          task: patch,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        alert(data.error || "Update failed");
+        return;
+      }
+      await onChanged?.();
+      const childId = userTask?.user_id;
+      if (childId) void notifyFamilySync(childId, "tasks");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleRemove(task: Task) {
+    setBusyId(task.id);
+    try {
+      const userTask = byTaskId.get(task.id);
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          action: "remove",
+          task_id: task.id,
+          user_task_id: userTask?.id,
+          child_user_id: userTask?.user_id,
+        }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        alert(data.error || "Remove failed");
+        return;
+      }
+      setRemovingIds((prev) => {
+        const next = new Set(prev);
+        next.add(task.id);
+        return next;
+      });
+      setCollapsingIds((prev) => {
+        const next = new Set(prev);
+        next.add(task.id);
+        return next;
+      });
+      await onChanged?.();
+      const childId = userTask?.user_id;
+      if (childId) void notifyFamilySync(childId, "tasks");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function handleAction(task: Task, action: TaskCardAction) {
     setBusyId(task.id);
     try {
@@ -476,12 +557,13 @@ export function TaskList({
         {yourTasks.map((task) => {
           const celebrating = celebratingIds.has(task.id);
           const collapsing = collapsingIds.has(task.id);
+          const removing = removingIds.has(task.id);
           return (
             <div
               key={task.id}
               className="overflow-hidden"
               style={{
-                maxHeight: collapsing ? 0 : 480,
+                maxHeight: collapsing ? 0 : 960,
                 opacity: collapsing ? 0 : 1,
                 transition: collapsing
                   ? `max-height ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${CELEBRATE_FADE_MS}ms ease`
@@ -494,6 +576,7 @@ export function TaskList({
                 isChild={isChild}
                 busy={busyId === task.id}
                 celebrate={celebrating}
+                removing={removing}
                 onCelebrateFadeStart={() =>
                   setCollapsingIds((prev) => {
                     const next = new Set(prev);
@@ -502,7 +585,16 @@ export function TaskList({
                   })
                 }
                 onCelebrateDone={() => finishCelebration(task.id)}
+                onRemoveDone={() => finishRemove(task.id)}
                 onAction={(action) => void handleAction(task, action)}
+                onUpdate={
+                  isChild
+                    ? undefined
+                    : (patch) => handleUpdate(task, patch)
+                }
+                onRemove={
+                  isChild ? undefined : () => handleRemove(task)
+                }
               />
             </div>
           );
@@ -515,17 +607,42 @@ export function TaskList({
         defaultOpen={false}
         empty={lockedTasks.length === 0}
       >
-        {lockedTasks.map((task) => (
-          <div key={task.id}>
-            <TaskCard
-              task={task}
-              userTask={byTaskId.get(task.id)}
-              isChild={isChild}
-              locked
-              lockHints={unmetPrereqHints(task, claimedNos)}
-            />
-          </div>
-        ))}
+        {lockedTasks.map((task) => {
+          const collapsing = collapsingIds.has(task.id);
+          const removing = removingIds.has(task.id);
+          return (
+            <div
+              key={task.id}
+              className="overflow-hidden"
+              style={{
+                maxHeight: collapsing ? 0 : 960,
+                opacity: collapsing ? 0 : 1,
+                transition: collapsing
+                  ? `max-height ${CELEBRATE_FADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${CELEBRATE_FADE_MS}ms ease`
+                  : undefined,
+              }}
+            >
+              <TaskCard
+                task={task}
+                userTask={byTaskId.get(task.id)}
+                isChild={isChild}
+                locked
+                lockHints={unmetPrereqHints(task, claimedNos, knownTaskNos)}
+                busy={busyId === task.id}
+                removing={removing}
+                onRemoveDone={() => finishRemove(task.id)}
+                onUpdate={
+                  isChild
+                    ? undefined
+                    : (patch) => handleUpdate(task, patch)
+                }
+                onRemove={
+                  isChild ? undefined : () => handleRemove(task)
+                }
+              />
+            </div>
+          );
+        })}
       </CollapsibleSection>
 
       <CollapsibleSection

@@ -4,23 +4,34 @@ import {
   BookIcon,
   BoltIcon,
   CheckIcon,
+  ChevronDownIcon,
   CloseIcon,
   FootprintsIcon,
   GemIcon,
   LockIcon,
   MicIcon,
+  PencilIcon,
   SparkIcon,
   SpinnerIcon,
   TargetIcon,
+  TrashIcon,
 } from "@/components/ui/Icons";
+import { SwipeToEnter } from "@/components/ui/SwipeToEnter";
 import { categoryKeyForTask, detailForTask } from "@/lib/task-details";
-import type { Task, UserTask } from "@/types";
+import {
+  draftPrerequisites,
+  filledPrereqCount,
+  prereqSidebarLabel,
+  serializePrereqsForSave,
+} from "@/lib/task-prerequisites";
+import type { Task, TaskIconKey, UserTask } from "@/types";
 import {
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 
 export type TaskCardAction =
@@ -30,8 +41,94 @@ export type TaskCardAction =
   | "dismiss"
   | "undo";
 
+export type TaskUpdatePatch = {
+  task_no: string;
+  category: string;
+  description: string | null;
+  exp: number;
+  gem: number;
+  icon_key: TaskIconKey | null;
+  detail_title: string | null;
+  detail_lead: string | null;
+  /** Aim + body in one box (blank line between); split on save. */
+  detail_extras: string | null;
+  /** Prerequisite task_no slots (empty strings ignored on save). */
+  prerequisites: string[];
+};
+
+/** Payload sent to POST /api/tasks update (detail_extras split into aim + body). */
+export type TaskSavePayload = {
+  task_no: string;
+  category: string;
+  description: string | null;
+  exp: number;
+  gem: number;
+  icon_key: TaskIconKey | null;
+  detail_title: string | null;
+  detail_lead: string | null;
+  detail_aim: string | null;
+  detail_body: string | null;
+  prereq_1?: string | null;
+  prereq_2?: string | null;
+  prereqs?: string[] | null;
+  /** When true, publish this task_no to the shared catalog for others to load. */
+  seed_catalog?: boolean;
+};
+
+const TASK_NO_LOOKUP_MIN = 3;
+const TASK_NO_LOOKUP_DEBOUNCE_MS = 450;
+
+function normalizeTaskNo(value: string): string {
+  return value.trim();
+}
+
+function serializeDraftForSeed(draft: TaskUpdatePatch): string {
+  return JSON.stringify({
+    task_no: normalizeTaskNo(draft.task_no),
+    category: draft.category.trim(),
+    description: (draft.description ?? "").trim(),
+    exp: draft.exp,
+    gem: draft.gem,
+    icon_key: draft.icon_key,
+    detail_title: (draft.detail_title ?? "").trim(),
+    detail_lead: (draft.detail_lead ?? "").trim(),
+    detail_extras: (draft.detail_extras ?? "").trim(),
+  });
+}
+
+function draftFromCatalogTask(catalog: Task, taskNo: string): TaskUpdatePatch {
+  const base = draftFromTask(catalog);
+  const trimmed = normalizeTaskNo(taskNo);
+  return { ...base, task_no: trimmed || catalog.task_no };
+}
+
+function joinDetailExtras(aim: string, body: string): string {
+  const a = aim.trim();
+  const b = body.trim();
+  if (!a) return b;
+  if (!b) return a;
+  return `${a}\n\n${b}`;
+}
+
+function splitDetailExtras(text: string | null | undefined): {
+  detail_aim: string | null;
+  detail_body: string | null;
+} {
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return { detail_aim: null, detail_body: null };
+  const split = trimmed.split(/\n\n/, 2);
+  if (split.length === 1) {
+    return { detail_aim: emptyToNull(split[0]), detail_body: null };
+  }
+  return {
+    detail_aim: emptyToNull(split[0]),
+    detail_body: emptyToNull(split[1]),
+  };
+}
+
 const EXIT_MS = 500;
 const EXPAND_MS = 500;
+const PREREQ_CONTENT_FADE_MS = 250;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 /** 5s completed ritual: wash 1s → COMPLETED → hide card chrome at 2s → hold → fade out 1s */
@@ -44,6 +141,73 @@ export const CELEBRATE_TOTAL_MS =
 const CELEBRATE_CONTENT_HIDE_MS = 2000;
 const CELEBRATE_LABEL_FADE_MS = 500;
 const WASH_COLOR = "#fdefd6";
+const DELETE_WASH_MS = 1000;
+const DELETE_WASH_COLOR = "#ffcdd2";
+const DELETE_STRIP_COLOR = "#e57373";
+
+const ICON_OPTIONS: TaskIconKey[] = [
+  "target",
+  "book",
+  "mic",
+  "spark",
+  "footprints",
+];
+
+function defaultIconKeyForTask(task: Task): TaskIconKey {
+  const kind = categoryKeyForTask(task);
+  switch (kind) {
+    case "community":
+      return "footprints";
+    case "eng_speak":
+      return "mic";
+    case "eng_vocab":
+      return "spark";
+    case "eng_writing":
+      return "book";
+    case "math_consolidation":
+    case "math_prelearning":
+      return "target";
+    default: {
+      const no = task.task_no.toLowerCase();
+      if (no.startsWith("math") || no.includes("goal")) return "target";
+      return "book";
+    }
+  }
+}
+
+function draftFromTask(task: Task): TaskUpdatePatch {
+  const detail = detailForTask(task);
+  const detailBodyFromCatalog =
+    detail?.paragraphs.slice(2).join("\n\n") ?? "";
+  const aim =
+    task.detail_aim?.trim() || detail?.paragraphs[1] || "";
+  const body =
+    task.detail_body?.trim() || detailBodyFromCatalog;
+
+  return {
+    task_no: task.task_no,
+    category: task.category || "",
+    description: task.description?.trim() || "",
+    exp: task.exp,
+    gem: task.gem,
+    icon_key: task.icon_key ?? defaultIconKeyForTask(task),
+    detail_title:
+      task.detail_title?.trim() || detail?.fullTitle || "",
+    detail_lead: task.detail_lead?.trim() || detail?.lead || "",
+    detail_extras: joinDetailExtras(aim, body),
+    prerequisites: draftPrerequisites(task),
+  };
+}
+
+function emptyToNull(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function parentCanEditStatus(status: string | undefined): boolean {
+  return !status || status === "available";
+}
 
 function CompletionRitual({
   active,
@@ -146,6 +310,83 @@ function CompletionRitual({
   );
 }
 
+/** Red wash → swipe-to-delete chrome (mentee-scoped remove). */
+function DeleteRitual({
+  active,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  active: boolean;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const [washOn, setWashOn] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!active) {
+      setWashOn(false);
+      setReady(false);
+      return;
+    }
+    const raf = window.requestAnimationFrame(() => setWashOn(true));
+    const tReady = window.setTimeout(() => setReady(true), DELETE_WASH_MS);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(tReady);
+    };
+  }, [active]);
+
+  if (!active) return null;
+
+  return (
+    <>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-20 origin-top"
+        style={{
+          background: DELETE_WASH_COLOR,
+          transform: washOn ? "scaleY(1)" : "scaleY(0)",
+          transition: `transform ${DELETE_WASH_MS}ms ${EASE}`,
+          opacity: ready ? 0 : 1,
+        }}
+      />
+      {ready ? (
+        <div className="absolute inset-0 z-30 flex overflow-hidden rounded-2xl">
+          <div
+            className="flex w-16 shrink-0 items-center justify-center"
+            style={{ background: DELETE_STRIP_COLOR }}
+          >
+            <TrashIcon size={22} className="text-white" />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 bg-[#ffebee] px-3 py-2">
+            <SwipeToEnter
+              compact
+              variant="delete"
+              label="Swipe to delete"
+              loading={busy}
+              disabled={busy}
+              onComplete={onConfirm}
+            />
+            <button
+              type="button"
+              className="self-end text-[11px] font-semibold uppercase tracking-wider text-[#c62828]"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancel();
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 /** Timed expand / reverse collapse with synced title+lead fades. */
 type Phase =
   | "closed"
@@ -174,11 +415,19 @@ type TaskCardProps = {
   /** Working-session location check for press-to-reveal subtitle. */
   logLocationConsistent?: boolean | null;
   onAction?: (action: TaskCardAction) => void;
+  /** Parent Save → persist task fields (last-write-wins). */
+  onUpdate?: (patch: TaskSavePayload) => void | Promise<void>;
+  /** Parent Trash → mentee-scoped remove (user_tasks.removed). */
+  onRemove?: () => void | Promise<void>;
   busy?: boolean;
   /** Play 5s completed ritual (wash → COMPLETED → fade out). */
   celebrate?: boolean;
   onCelebrateDone?: () => void;
   onCelebrateFadeStart?: () => void;
+  /** Fade out after successful delete swipe (TaskList collapses slot). */
+  removing?: boolean;
+  onRemoveFadeStart?: () => void;
+  onRemoveDone?: () => void;
 };
 
 export function formatCompletedOn(iso: string | null | undefined): string | null {
@@ -269,20 +518,53 @@ function LogSubtitle({
   );
 }
 
+function GlyphByKey({
+  iconKey,
+  className = "text-gold",
+  size = 24,
+}: {
+  iconKey: TaskIconKey | null | undefined;
+  className?: string;
+  size?: number;
+}) {
+  switch (iconKey) {
+    case "footprints":
+      return <FootprintsIcon size={size} className={className} />;
+    case "mic":
+      return <MicIcon size={size} className={className} />;
+    case "spark":
+      return <SparkIcon size={size} className={className} />;
+    case "book":
+      return <BookIcon size={size} className={className} />;
+    case "target":
+      return <TargetIcon size={size} className={className} />;
+    default:
+      return null;
+  }
+}
+
 function TaskGlyph({
   task,
   locked,
   claimed,
+  iconOverride,
 }: {
   task: Task;
   locked: boolean;
   claimed: boolean;
+  iconOverride?: TaskIconKey | null;
 }) {
   if (locked) {
     return <LockIcon size={20} className="text-[rgba(138,122,104,0.7)]" />;
   }
   if (claimed) {
     return <CheckIcon size={22} className="text-gold" />;
+  }
+
+  const preferred = iconOverride ?? task.icon_key;
+  if (preferred) {
+    const keyed = <GlyphByKey iconKey={preferred} />;
+    if (keyed) return keyed;
   }
 
   const kind = categoryKeyForTask(task);
@@ -321,6 +603,261 @@ function Rewards({ exp, gem }: { exp: number; gem: number }) {
         <GemIcon size={12} />
         {gem}
       </span>
+    </div>
+  );
+}
+
+function SteppedRewardSlider({
+  kind,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  compact = false,
+}: {
+  kind: "exp" | "gem";
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (next: number) => void;
+  /** Fill half of the fixed edit slot; track vertically centered in row. */
+  compact?: boolean;
+}) {
+  const [pressing, setPressing] = useState(false);
+  const stops: number[] = [];
+  for (let v = min; v <= max; v += step) stops.push(v);
+  const progress = max === min ? 0 : (value - min) / (max - min);
+  const isExp = kind === "exp";
+  const accent = isExp ? "#c8922a" : "#7b68ee";
+  const accentDeep = isExp ? "#ecc788" : "#b3a7f2";
+  const trackBg = isExp ? "rgba(200,146,42,0.22)" : "rgba(123,104,238,0.22)";
+
+  useEffect(() => {
+    if (!pressing) return;
+    const end = () => setPressing(false);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return () => {
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  }, [pressing]);
+
+  return (
+    <div
+      className={`relative w-full px-4 ${compact ? "flex h-full min-h-0 items-center py-0" : "py-3"}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="relative flex h-3 w-full min-w-0 items-center justify-between">
+        <div
+          className="pointer-events-none absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full"
+          style={{ backgroundColor: trackBg }}
+        />
+        <div
+          className="pointer-events-none absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded-full transition-[width] duration-150 ease-out"
+          style={{
+            // Match justify-between stop centers (dot = 0.625rem)
+            width: `calc(${progress} * (100% - 0.625rem) + 0.3125rem)`,
+            backgroundColor: accent,
+          }}
+        />
+
+        {stops.map((stop) => {
+          const reached = stop <= value;
+          const current = stop === value;
+          return (
+            <button
+              key={stop}
+              type="button"
+              aria-label={`${isExp ? "EXP" : "Gem"} ${stop}`}
+              aria-pressed={current}
+              className="relative z-10 size-2.5 shrink-0 rounded-full transition-transform duration-150"
+              style={{
+                backgroundColor: reached ? accentDeep : trackBg,
+                transform: current ? "scale(1.2)" : undefined,
+              }}
+              onPointerDown={() => setPressing(true)}
+              onClick={() => onChange(stop)}
+            />
+          );
+        })}
+
+        {/* Chip center-aligned with the active stop; lifts while pressing */}
+        <div
+          className="pointer-events-none absolute top-1/2 z-30 transition-transform duration-150 ease-out"
+          style={{
+            left: `calc(${progress} * (100% - 0.625rem) + 0.3125rem)`,
+            transform: `translate(-50%, ${pressing ? "calc(-50% - 45px)" : "-50%"})`,
+          }}
+        >
+          <span
+            className="flex h-7 min-w-7 items-center justify-center gap-1 whitespace-nowrap rounded-full px-2.5 text-[12px] font-semibold leading-none text-white shadow-[0px_2px_8px_0px_rgba(0,0,0,0.2)]"
+            style={{
+              backgroundImage: isExp
+                ? "linear-gradient(151deg, rgb(252, 221, 166) 0%, rgb(200, 146, 42) 100%)"
+                : "linear-gradient(151deg, #b39ddb 0%, #5e35b1 100%)",
+            }}
+          >
+            {isExp ? (
+              <BoltIcon size={13} className="text-white" />
+            ) : (
+              <GemIcon size={13} className="text-white" />
+            )}
+            {value}
+          </span>
+        </div>
+      </div>
+
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        aria-label={isExp ? "EXP reward" : "Gem reward"}
+        className="absolute inset-0 z-20 h-full w-full cursor-pointer opacity-0"
+        onPointerDown={() => setPressing(true)}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </div>
+  );
+}
+
+function CircleIconButton({
+  label,
+  tone,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  tone: "purple" | "red" | "green";
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  const iconTone =
+    tone === "purple"
+      ? "text-[#5e35b1]"
+      : tone === "green"
+        ? "text-[#2e7d32]"
+        : "text-[#c62828]";
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) onClick();
+      }}
+      className={`inline-flex size-8 items-center justify-center rounded-full border border-[rgba(200,146,42,0.2)] bg-surface transition hover:bg-[rgba(252,221,166,0.35)] active:brightness-95 disabled:cursor-wait disabled:opacity-50 ${iconTone}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PrereqSidebarStrip({
+  count,
+  open,
+  onToggle,
+}: {
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-label="Edit prerequisites"
+      className="flex w-full flex-col items-center gap-1 py-2"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+    >
+      <span className="inline-flex shrink-0 rounded-lg p-1">
+        <ChevronDownIcon
+          size={22}
+          className={`shrink-0 text-gold transition-transform duration-300 ${open ? "rotate-90" : "-rotate-90"}`}
+        />
+      </span>
+      <span
+        className="max-h-[9rem] text-center text-[15px] font-semibold uppercase leading-[1.15] tracking-[0.06em] text-[#8a7a68]"
+        style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+      >
+        {prereqSidebarLabel(count)}
+      </span>
+    </button>
+  );
+}
+
+function PrereqEditPanel({
+  expanded,
+  contentVisible,
+  prerequisites,
+  onChange,
+  onAdd,
+}: {
+  expanded: boolean;
+  contentVisible: boolean;
+  prerequisites: string[];
+  onChange: (index: number, value: string) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div
+      className="absolute top-0 bottom-0 z-30 overflow-x-hidden p-3 pr-[5.5rem]"
+      style={{
+        left: 64,
+        right: 0,
+        background: WASH_COLOR,
+        transformOrigin: "left center",
+        transform: expanded ? "scaleX(1)" : "scaleX(0)",
+        pointerEvents: expanded && contentVisible ? "auto" : "none",
+        transition: `transform ${EXPAND_MS}ms ${EASE}`,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div
+        className="flex h-full flex-col gap-2 overflow-y-auto"
+        style={{
+          opacity: contentVisible ? 1 : 0,
+          transition: `opacity ${PREREQ_CONTENT_FADE_MS}ms ${EASE}`,
+        }}
+      >
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8a7a68]">
+          Prerequisites{" "}
+          <span className="normal-case tracking-normal">- OPTIONAL</span>
+        </p>
+        {prerequisites.map((value, index) => (
+          <input
+            key={`prereq-${index}`}
+            value={value}
+            aria-label={`Prerequisite ${index + 1}`}
+            placeholder="Prerequisite task code"
+            className="w-full rounded border border-[rgba(200,146,42,0.3)] bg-[#fffaf2] px-2 py-1 text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68] outline-none placeholder:font-normal placeholder:normal-case placeholder:tracking-normal placeholder:text-[rgba(138,122,104,0.55)]"
+            onChange={(e) => onChange(index, e.target.value)}
+          />
+        ))}
+        <button
+          type="button"
+          aria-label="Add prerequisite"
+          className="inline-flex h-5 w-[4.375rem] items-center justify-center rounded-full text-[9px] font-semibold uppercase tracking-wider text-white transition hover:brightness-95 active:brightness-90"
+          style={{
+            backgroundImage:
+              "linear-gradient(151deg, rgb(252, 221, 166) 0%, rgb(200, 146, 42) 100%)",
+            boxShadow: "0px 2px 8px 0px rgba(200, 146, 42, 0.35)",
+          }}
+          onClick={onAdd}
+        >
+          + More
+        </button>
+      </div>
     </div>
   );
 }
@@ -579,7 +1116,15 @@ const exitStyle = (gone: boolean): CSSProperties => ({
 
 /** Reserved width so compact title/lead clears the absolute action rail. */
 const ACTION_RAIL_PR = "pr-[5.75rem]";
+/** Wider rail when parent pen/trash or save/cancel circles are shown. */
+const PARENT_EDIT_RAIL_PR = "pr-[5.5rem]";
 const REWARDS_RAIL_PR = "pr-14";
+/** Shared Basic (sliders) / Advance (details textarea) slot — keeps edit card height stable. */
+const EDIT_BOTTOM_SLOT_H = 107;
+const EDIT_MODE_SWAP_MS = 500;
+const EDIT_MODE_SWAP_HALF = EDIT_MODE_SWAP_MS / 2;
+const EDIT_INPUT_SHELL =
+  "rounded border border-[rgba(200,146,42,0.3)] bg-[#fffaf2]";
 
 const COLLAPSED_BODY_H = 18;
 /** Even height reveal so expand doesn't front-load (oversized max-height + ease-out pops). */
@@ -683,17 +1228,49 @@ export function TaskCard({
   logSignedBy,
   logLocationConsistent,
   onAction,
+  onUpdate,
+  onRemove,
   busy = false,
   celebrate = false,
   onCelebrateDone,
   onCelebrateFadeStart,
+  removing = false,
+  onRemoveFadeStart,
+  onRemoveDone,
 }: TaskCardProps) {
-  const detail = detailForTask(task);
-  const canExpand = Boolean(detail) && !locked && !celebrate;
+  const [editing, setEditing] = useState(false);
+  const [advanceOpen, setAdvanceOpen] = useState(false);
+  const [editSwapOpacity, setEditSwapOpacity] = useState(1);
+  const advanceSwapTimerRef = useRef<number | null>(null);
+  const [prereqPanelOpen, setPrereqPanelOpen] = useState(false);
+  const [prereqStripOpen, setPrereqStripOpen] = useState(false);
+  const [prereqPanelExpanded, setPrereqPanelExpanded] = useState(false);
+  const [prereqPanelContentVisible, setPrereqPanelContentVisible] =
+    useState(false);
+  const prereqPanelTimerRef = useRef<number | null>(null);
+  const prereqPanelCollapseTimerRef = useRef<number | null>(null);
+  const [draft, setDraft] = useState<TaskUpdatePatch | null>(null);
+  const [catalogLookupLoading, setCatalogLookupLoading] = useState(false);
+  const [catalogMatch, setCatalogMatch] = useState<Task | null>(null);
+  const [loadedFromCatalogId, setLoadedFromCatalogId] = useState<string | null>(
+    null,
+  );
+  const novelTaskNoRef = useRef<string | null>(null);
+  const novelSnapshotRef = useRef<string | null>(null);
+  const novelModifiedRef = useRef(false);
+  const [deleteRitual, setDeleteRitual] = useState(false);
+  const [removeFading, setRemoveFading] = useState(false);
   const [celebrateFading, setCelebrateFading] = useState(false);
   const [celebrateContentGone, setCelebrateContentGone] = useState(false);
   const [logRevealed, setLogRevealed] = useState(false);
   const logFlipBusy = useRef(false);
+  const removeDoneRef = useRef(false);
+
+  const detail = detailForTask(task);
+  const interactiveBlocked =
+    celebrate || deleteRitual || removing || editing;
+  const canExpand =
+    Boolean(detail) && !locked && !interactiveBlocked;
 
   useEffect(() => {
     if (!celebrate) {
@@ -702,6 +1279,118 @@ export function TaskCard({
     }
   }, [celebrate]);
 
+  useEffect(() => {
+    if (!editing || !draft) {
+      setCatalogLookupLoading(false);
+      setCatalogMatch(null);
+      return;
+    }
+
+    const trimmed = normalizeTaskNo(draft.task_no);
+    if (trimmed.length < TASK_NO_LOOKUP_MIN) {
+      setCatalogLookupLoading(false);
+      setCatalogMatch(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setCatalogLookupLoading(true);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/api/tasks?lookup=${encodeURIComponent(trimmed)}`,
+            { signal: controller.signal, credentials: "same-origin" },
+          );
+          if (!res.ok || controller.signal.aborted) return;
+          const data = (await res.json()) as { task: Task | null };
+          if (controller.signal.aborted) return;
+          const match = data.task;
+          setCatalogMatch(match);
+          if (!match) {
+            if (novelTaskNoRef.current !== trimmed) {
+              novelTaskNoRef.current = trimmed;
+              novelSnapshotRef.current = serializeDraftForSeed(draft);
+              novelModifiedRef.current = false;
+            }
+          } else {
+            novelTaskNoRef.current = null;
+            novelSnapshotRef.current = null;
+            novelModifiedRef.current = false;
+          }
+        } catch {
+          if (!controller.signal.aborted) setCatalogMatch(null);
+        } finally {
+          if (!controller.signal.aborted) setCatalogLookupLoading(false);
+        }
+      })();
+    }, TASK_NO_LOOKUP_DEBOUNCE_MS);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [editing, draft?.task_no]);
+
+  useEffect(() => {
+    if (!editing || !draft || !novelSnapshotRef.current || !novelTaskNoRef.current) {
+      return;
+    }
+    if (normalizeTaskNo(draft.task_no) !== novelTaskNoRef.current) return;
+    if (serializeDraftForSeed(draft) !== novelSnapshotRef.current) {
+      novelModifiedRef.current = true;
+    }
+  }, [editing, draft]);
+
+  useEffect(() => {
+    return () => {
+      if (advanceSwapTimerRef.current != null) {
+        window.clearTimeout(advanceSwapTimerRef.current);
+      }
+      if (prereqPanelTimerRef.current != null) {
+        window.clearTimeout(prereqPanelTimerRef.current);
+      }
+      if (prereqPanelCollapseTimerRef.current != null) {
+        window.clearTimeout(prereqPanelCollapseTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!prereqPanelOpen) {
+      setPrereqPanelExpanded(false);
+      setPrereqPanelContentVisible(false);
+      return;
+    }
+    setPrereqPanelContentVisible(false);
+    const raf = window.requestAnimationFrame(() => setPrereqPanelExpanded(true));
+    const contentTimer = window.setTimeout(
+      () => setPrereqPanelContentVisible(true),
+      EXPAND_MS,
+    );
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(contentTimer);
+    };
+  }, [prereqPanelOpen]);
+
+  useEffect(() => {
+    if (!removing) {
+      setRemoveFading(false);
+      removeDoneRef.current = false;
+      return;
+    }
+    setRemoveFading(true);
+    onRemoveFadeStart?.();
+    const t = window.setTimeout(() => {
+      if (!removeDoneRef.current) {
+        removeDoneRef.current = true;
+        onRemoveDone?.();
+      }
+    }, CELEBRATE_FADE_MS);
+    return () => window.clearTimeout(t);
+  }, [removing, onRemoveFadeStart, onRemoveDone]);
+
   const {
     phase,
     sidesGone,
@@ -709,6 +1398,7 @@ export function TaskCard({
     useExpandedCopy,
     labelOpacity,
     toggle,
+    collapse,
   } = useStagedExpand(canExpand);
 
   // -------- Finished / session log --------
@@ -841,9 +1531,19 @@ export function TaskCard({
   const pending = status === "pending";
   const verified = status === "verified";
   const unmetHints = (lockHints ?? []).filter(Boolean);
-  const compactTitle = task.category || task.title || task.task_no;
+  const canParentEdit =
+    !isChild &&
+    parentCanEditStatus(status) &&
+    Boolean(onUpdate || onRemove) &&
+    !celebrate &&
+    !removing;
+  const compactTitle =
+    (editing && draft ? draft.category : null) ||
+    task.category ||
+    task.title ||
+    task.task_no;
   const compactSubtitle =
-    locked
+    locked && !editing
       ? null
       : pending && isChild
         ? "Pending Mentor Review"
@@ -851,19 +1551,230 @@ export function TaskCard({
           ? "Claim to Complete"
           : verified && !isChild
             ? "Marked as Passed"
-            : task.description || null;
-  const showAction = !locked && Boolean(action || doneLook);
-  const displayTitle = useExpandedCopy && detail
-    ? detail.fullTitle
-    : compactTitle;
+            : (editing && draft
+                ? draft.description
+                : task.description) || null;
+  const showAction = !locked && !editing && !deleteRitual && Boolean(action || doneLook);
+  const displayTitle =
+    useExpandedCopy && detail && !editing
+      ? detail.fullTitle
+      : compactTitle;
+  const railPad =
+    canParentEdit || editing ? PARENT_EDIT_RAIL_PR : ACTION_RAIL_PR;
 
-  if (locked) {
+  function resetCatalogEditState() {
+    setCatalogLookupLoading(false);
+    setCatalogMatch(null);
+    setLoadedFromCatalogId(null);
+    novelTaskNoRef.current = null;
+    novelSnapshotRef.current = null;
+    novelModifiedRef.current = false;
+  }
+
+  function clearAdvanceSwapTimer() {
+    if (advanceSwapTimerRef.current != null) {
+      window.clearTimeout(advanceSwapTimerRef.current);
+      advanceSwapTimerRef.current = null;
+    }
+  }
+
+  function resetEditSwapState() {
+    clearAdvanceSwapTimer();
+    setEditSwapOpacity(1);
+    closePrereqPanel();
+  }
+
+  function clearPrereqPanelTimers() {
+    if (prereqPanelTimerRef.current != null) {
+      window.clearTimeout(prereqPanelTimerRef.current);
+      prereqPanelTimerRef.current = null;
+    }
+    if (prereqPanelCollapseTimerRef.current != null) {
+      window.clearTimeout(prereqPanelCollapseTimerRef.current);
+      prereqPanelCollapseTimerRef.current = null;
+    }
+  }
+
+  function closePrereqPanel() {
+    clearPrereqPanelTimers();
+    setPrereqStripOpen(false);
+    setPrereqPanelContentVisible(false);
+    setPrereqPanelExpanded(false);
+    setPrereqPanelOpen(false);
+  }
+
+  function togglePrereqPanel() {
+    if (prereqPanelOpen) {
+      setPrereqStripOpen(false);
+      setPrereqPanelContentVisible(false);
+      clearPrereqPanelTimers();
+      prereqPanelTimerRef.current = window.setTimeout(() => {
+        setPrereqPanelExpanded(false);
+        prereqPanelCollapseTimerRef.current = window.setTimeout(() => {
+          setPrereqPanelOpen(false);
+          prereqPanelCollapseTimerRef.current = null;
+        }, EXPAND_MS);
+        prereqPanelTimerRef.current = null;
+      }, PREREQ_CONTENT_FADE_MS);
+      return;
+    }
+    setPrereqStripOpen(true);
+    setPrereqPanelOpen(true);
+  }
+
+  function updatePrereq(index: number, value: string) {
+    if (!draft) return;
+    const next = [...draft.prerequisites];
+    next[index] = value;
+    setDraft({ ...draft, prerequisites: next });
+  }
+
+  function addPrereqSlot() {
+    if (!draft) return;
+    setDraft({ ...draft, prerequisites: [...draft.prerequisites, ""] });
+  }
+
+  function toggleAdvanceMode() {
+    if (editSwapOpacity < 1) return;
+    closePrereqPanel();
+    clearAdvanceSwapTimer();
+    setEditSwapOpacity(0);
+    advanceSwapTimerRef.current = window.setTimeout(() => {
+      setAdvanceOpen((v) => !v);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => setEditSwapOpacity(1));
+      });
+      advanceSwapTimerRef.current = null;
+    }, EDIT_MODE_SWAP_HALF);
+  }
+
+  const editSwapFadeStyle: CSSProperties = {
+    opacity: editSwapOpacity,
+    transition: `opacity ${EDIT_MODE_SWAP_HALF}ms ${EASE}`,
+    pointerEvents: editSwapOpacity < 1 ? "none" : undefined,
+  };
+
+  function beginEdit() {
+    if (detailsOpen) collapse();
+    resetCatalogEditState();
+    resetEditSwapState();
+    setDraft(draftFromTask(task!));
+    setAdvanceOpen(false);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setAdvanceOpen(false);
+    setDraft(null);
+    resetCatalogEditState();
+    resetEditSwapState();
+  }
+
+  function loadCatalogIntoDraft() {
+    if (!draft || !catalogMatch || catalogLookupLoading) return;
+    setDraft(draftFromCatalogTask(catalogMatch, catalogMatch.task_no));
+    setLoadedFromCatalogId(catalogMatch.id);
+    novelTaskNoRef.current = null;
+    novelSnapshotRef.current = null;
+    novelModifiedRef.current = false;
+    if (
+      catalogMatch.detail_title ||
+      catalogMatch.detail_lead ||
+      catalogMatch.detail_aim ||
+      catalogMatch.detail_body
+    ) {
+      setAdvanceOpen(true);
+    }
+  }
+
+  async function saveEdit() {
+    if (!draft || !onUpdate) return;
+    const { detail_aim, detail_body } = splitDetailExtras(draft.detail_extras);
+    const trimmedNo = normalizeTaskNo(draft.task_no);
+    let seed_catalog: boolean | undefined;
+    if (loadedFromCatalogId) {
+      seed_catalog = undefined;
+    } else if (
+      novelTaskNoRef.current &&
+      trimmedNo === novelTaskNoRef.current
+    ) {
+      seed_catalog = !novelModifiedRef.current;
+    } else if (!catalogMatch && trimmedNo.length >= TASK_NO_LOOKUP_MIN) {
+      seed_catalog = true;
+    }
+    const patch: TaskSavePayload = {
+      task_no: draft.task_no,
+      category: draft.category,
+      description: emptyToNull(draft.description ?? ""),
+      exp: draft.exp,
+      gem: draft.gem,
+      icon_key: draft.icon_key,
+      detail_title: emptyToNull(draft.detail_title ?? ""),
+      detail_lead: emptyToNull(draft.detail_lead ?? ""),
+      detail_aim,
+      detail_body,
+      ...serializePrereqsForSave(draft.prerequisites),
+      seed_catalog,
+    };
+    await onUpdate(patch);
+    setEditing(false);
+    setAdvanceOpen(false);
+    setDraft(null);
+    resetCatalogEditState();
+    resetEditSwapState();
+  }
+
+  function beginDelete() {
+    if (detailsOpen) collapse();
+    setEditing(false);
+    setDraft(null);
+    setDeleteRitual(true);
+  }
+
+  // Locked cards: parents can still edit/remove when status allows.
+  if (locked && !editing && !deleteRitual) {
     return (
-      <article className="flex min-h-[82px] overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.08)] bg-[rgba(240,232,216,0.5)] opacity-70 shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)]">
+      <article
+        className={`relative flex min-h-[82px] overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.08)] bg-[rgba(240,232,216,0.5)] opacity-70 shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
+          removeFading ? "opacity-0" : ""
+        }`}
+        style={{
+          transition: removing
+            ? `opacity ${CELEBRATE_FADE_MS}ms ease`
+            : undefined,
+        }}
+      >
+        {canParentEdit ? (
+          <div className="absolute top-0 right-0 z-10 flex h-[82px] flex-col items-end justify-start gap-1.5 py-3 pr-3">
+            <div className="flex items-center gap-1.5">
+              {onUpdate ? (
+                <CircleIconButton
+                  label="Edit task"
+                  tone="purple"
+                  disabled={busy}
+                  onClick={beginEdit}
+                >
+                  <PencilIcon size={14} />
+                </CircleIconButton>
+              ) : null}
+              {onRemove ? (
+                <CircleIconButton
+                  label="Remove task for mentee"
+                  tone="red"
+                  disabled={busy}
+                  onClick={beginDelete}
+                >
+                  <TrashIcon size={14} />
+                </CircleIconButton>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <div className="flex w-16 shrink-0 items-center justify-center bg-[rgba(200,146,42,0.06)]">
           <TaskGlyph task={task} locked claimed={false} />
         </div>
-        <div className="min-w-0 flex-1 p-3">
+        <div className={`min-w-0 flex-1 p-3 ${canParentEdit ? railPad : ""}`}>
           <p className="text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68]">
             {task.task_no}
           </p>
@@ -883,20 +1794,32 @@ export function TaskCard({
     );
   }
 
+  const showDeleteChrome = deleteRitual;
+  const fadingOut = celebrateFading || removeFading;
+
   return (
     <article
       className={`relative overflow-hidden rounded-2xl border border-[rgba(200,146,42,0.18)] shadow-[0px_2px_16px_0px_rgba(200,146,42,0.08)] ${
-        canExpand ? "cursor-pointer" : ""
-      } ${celebrate ? "" : "bg-[rgba(255,250,242,0.9)]"}`}
-      onClick={celebrate ? undefined : toggle}
+        canExpand && !editing ? "cursor-pointer" : ""
+      } ${celebrate || showDeleteChrome ? "" : "bg-[rgba(255,250,242,0.9)]"}`}
+      onClick={
+        interactiveBlocked || editing
+          ? undefined
+          : toggle
+      }
       aria-expanded={detailsOpen}
       style={{
-        opacity: celebrateFading ? 0 : 1,
-        background: celebrate ? WASH_COLOR : undefined,
-        transition: celebrate
-          ? `opacity ${CELEBRATE_FADE_MS}ms ease`
-          : undefined,
-        pointerEvents: celebrate ? "none" : undefined,
+        opacity: fadingOut ? 0 : 1,
+        background: celebrate
+          ? WASH_COLOR
+          : showDeleteChrome
+            ? DELETE_WASH_COLOR
+            : undefined,
+        transition:
+          celebrate || removing
+            ? `opacity ${CELEBRATE_FADE_MS}ms ease`
+            : undefined,
+        pointerEvents: celebrate || removing ? "none" : undefined,
       }}
     >
       <CompletionRitual
@@ -908,78 +1831,369 @@ export function TaskCard({
         }}
         onDone={onCelebrateDone}
       />
+      <DeleteRitual
+        active={showDeleteChrome}
+        busy={busy}
+        onCancel={() => setDeleteRitual(false)}
+        onConfirm={async () => {
+          await onRemove?.();
+        }}
+      />
 
       <div
         style={{
-          opacity: celebrateContentGone ? 0 : 1,
+          opacity: celebrateContentGone || showDeleteChrome ? 0 : 1,
           transition: celebrate
             ? `opacity ${CELEBRATE_LABEL_FADE_MS}ms ease`
-            : undefined,
+            : showDeleteChrome
+              ? `opacity ${DELETE_WASH_MS}ms ease`
+              : undefined,
+          pointerEvents: showDeleteChrome ? "none" : undefined,
         }}
-        aria-hidden={celebrateContentGone || undefined}
+        aria-hidden={celebrateContentGone || showDeleteChrome || undefined}
       >
         {/* Fixed top-right rail; expanded body uses the space underneath */}
-        <div className="absolute top-0 right-0 z-10 flex h-[82px] flex-col items-end justify-between py-3 pr-3">
-          <Rewards exp={task.exp} gem={task.gem} />
-          {showAction ? (
-            <ActionButton
-              action={action}
-              doneLook={doneLook}
-              busy={busy}
-              onAction={onAction}
-            />
-          ) : null}
+        <div className="absolute top-0 right-0 z-10 flex min-h-[82px] flex-col items-end justify-between gap-1.5 py-3 pr-3">
+          {editing ? (
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <CircleIconButton
+                  label="Save changes"
+                  tone="green"
+                  disabled={busy}
+                  onClick={() => void saveEdit()}
+                >
+                  {busy ? (
+                    <SpinnerIcon size={14} />
+                  ) : (
+                    <CheckIcon size={14} />
+                  )}
+                </CircleIconButton>
+                <CircleIconButton
+                  label="Cancel edit"
+                  tone="red"
+                  disabled={busy}
+                  onClick={cancelEdit}
+                >
+                  <CloseIcon size={14} />
+                </CircleIconButton>
+              </div>
+              <button
+                type="button"
+                className="inline-flex h-5 w-[4.375rem] items-center justify-center rounded-full text-[9px] font-semibold uppercase tracking-wider text-white transition hover:brightness-95 active:brightness-90"
+                style={{
+                  backgroundImage:
+                    "linear-gradient(151deg, rgb(252, 221, 166) 0%, rgb(200, 146, 42) 100%)",
+                  boxShadow: "0px 2px 8px 0px rgba(200, 146, 42, 0.35)",
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleAdvanceMode();
+                }}
+                disabled={editSwapOpacity < 1}
+              >
+                {advanceOpen ? "Basic" : "Advance"}
+              </button>
+            </div>
+          ) : (
+            <>
+              <Rewards exp={task.exp} gem={task.gem} />
+              <div className="flex items-center gap-1.5">
+                {canParentEdit && onUpdate ? (
+                  <CircleIconButton
+                    label="Edit task"
+                    tone="purple"
+                    disabled={busy}
+                    onClick={beginEdit}
+                  >
+                    <PencilIcon size={14} />
+                  </CircleIconButton>
+                ) : null}
+                {canParentEdit && onRemove ? (
+                  <CircleIconButton
+                    label="Remove task for mentee"
+                    tone="red"
+                    disabled={busy}
+                    onClick={beginDelete}
+                  >
+                    <TrashIcon size={14} />
+                  </CircleIconButton>
+                ) : null}
+                {showAction ? (
+                  <ActionButton
+                    action={action}
+                    doneLook={doneLook}
+                    busy={busy}
+                    onAction={onAction}
+                  />
+                ) : null}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex items-start overflow-hidden">
-          {/* Stage 1 (0.5s): glyph slides left; compact title/lead fade out in parallel */}
           <div
-            className="flex shrink-0 items-center justify-center overflow-hidden bg-[rgba(252,221,166,0.35)]"
+            className="flex w-16 shrink-0 flex-col items-center justify-center gap-1.5 overflow-hidden py-2"
             style={{
-              ...exitStyle(sidesGone),
-              width: sidesGone ? 0 : 64,
-              minWidth: sidesGone ? 0 : 64,
+              backgroundColor: WASH_COLOR,
+              ...exitStyle(sidesGone && !editing),
+              width: sidesGone && !editing ? 0 : 64,
+              minWidth: sidesGone && !editing ? 0 : 64,
               alignSelf: "stretch",
               minHeight: 82,
             }}
           >
-            <TaskGlyph task={task} locked={false} claimed={claimed} />
+            {editing && draft ? (
+              <div style={editSwapFadeStyle}>
+                {advanceOpen ? (
+                  <PrereqSidebarStrip
+                    count={filledPrereqCount(draft.prerequisites)}
+                    open={prereqStripOpen}
+                    onToggle={togglePrereqPanel}
+                  />
+                ) : (
+                  <div
+                    className="flex flex-col items-center gap-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {ICON_OPTIONS.map((key) => {
+                      const selected =
+                        (draft.icon_key ?? defaultIconKeyForTask(task)) === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          aria-label={`Icon ${key}`}
+                          aria-pressed={selected}
+                          className={`rounded-lg p-1 transition ${
+                            selected
+                              ? "bg-[rgba(200,146,42,0.45)] shadow-[0px_1px_4px_0px_rgba(200,146,42,0.25)]"
+                              : "opacity-40 hover:opacity-100"
+                          }`}
+                          onClick={() =>
+                            setDraft({ ...draft, icon_key: key })
+                          }
+                        >
+                          <GlyphByKey
+                            iconKey={key}
+                            size={22}
+                            className="text-gold"
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <TaskGlyph
+                task={task}
+                locked={false}
+                claimed={claimed}
+                iconOverride={draft?.icon_key}
+              />
+            )}
           </div>
 
           <div className="min-w-0 flex-1 p-3">
-            <div className={ACTION_RAIL_PR}>
-              <p className="text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68]">
-                {task.task_no}
-              </p>
-              <PhaseLabel
-                phase={phase}
-                text={displayTitle}
-                opacity={labelOpacity}
-                className="text-sm font-semibold leading-snug text-ink"
-              />
-            </div>
+            {editing && draft ? (
+              <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+                <div className={`space-y-2 ${PARENT_EDIT_RAIL_PR}`}>
+                  <div className="relative">
+                    <input
+                      value={draft.task_no}
+                      aria-label="Task code"
+                      placeholder="Task Code (Recognizable)"
+                      className="w-full rounded border border-[rgba(200,146,42,0.3)] bg-[#fffaf2] py-1 pl-2 pr-8 text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68] outline-none placeholder:font-normal placeholder:normal-case placeholder:tracking-normal placeholder:text-[rgba(138,122,104,0.55)]"
+                      onChange={(e) => {
+                        setLoadedFromCatalogId(null);
+                        setDraft({ ...draft, task_no: e.target.value });
+                      }}
+                    />
+                    {catalogLookupLoading ||
+                    (catalogMatch && catalogMatch.id !== task.id) ? (
+                      <button
+                        type="button"
+                        aria-label={
+                          catalogLookupLoading
+                            ? "Looking up task code"
+                            : "Load catalog details for this task code"
+                        }
+                        aria-busy={catalogLookupLoading || undefined}
+                        disabled={catalogLookupLoading || !catalogMatch}
+                        title={
+                          catalogLookupLoading
+                            ? "Looking up…"
+                            : "Load shared catalog details"
+                        }
+                        className="absolute top-1/2 right-1 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full transition enabled:hover:bg-[rgba(200,146,42,0.12)] disabled:cursor-default"
+                        onClick={() => loadCatalogIntoDraft()}
+                      >
+                        <SpinnerIcon
+                          size={14}
+                          className={
+                            catalogLookupLoading
+                              ? "text-gold"
+                              : "text-[rgba(200,146,42,0.85)]"
+                          }
+                        />
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className={EDIT_INPUT_SHELL}>
+                    <div style={editSwapFadeStyle}>
+                      {advanceOpen ? (
+                        <input
+                          value={draft.detail_title ?? ""}
+                          aria-label="Detail title"
+                          placeholder="Longer Title (Optional)"
+                          className="w-full border-0 bg-transparent px-2 py-1 text-sm font-semibold text-ink outline-none placeholder:font-normal placeholder:text-[rgba(138,122,104,0.55)]"
+                          onChange={(e) =>
+                            setDraft({ ...draft, detail_title: e.target.value })
+                          }
+                        />
+                      ) : (
+                        <input
+                          value={draft.category}
+                          aria-label="Title"
+                          placeholder="Task Title"
+                          className="w-full border-0 bg-transparent px-2 py-1 text-sm font-semibold text-ink outline-none placeholder:font-normal placeholder:text-[rgba(138,122,104,0.55)]"
+                          onChange={(e) =>
+                            setDraft({ ...draft, category: e.target.value })
+                          }
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className={EDIT_INPUT_SHELL}>
+                  <div style={editSwapFadeStyle}>
+                    {advanceOpen ? (
+                      <input
+                        value={draft.detail_lead ?? ""}
+                        aria-label="Detail lead"
+                        placeholder="Longer Description Line (Optional)"
+                        className="w-full border-0 bg-transparent px-2 py-1 text-xs leading-relaxed text-[#8a7a68] outline-none placeholder:text-[rgba(138,122,104,0.55)]"
+                        onChange={(e) =>
+                          setDraft({ ...draft, detail_lead: e.target.value })
+                        }
+                      />
+                    ) : (
+                      <input
+                        value={draft.description ?? ""}
+                        aria-label="Description"
+                        placeholder="Description Line (Optional)"
+                        className="w-full border-0 bg-transparent px-2 py-1 text-xs leading-relaxed text-[#8a7a68] outline-none placeholder:text-[rgba(138,122,104,0.55)]"
+                        onChange={(e) =>
+                          setDraft({ ...draft, description: e.target.value })
+                        }
+                      />
+                    )}
+                  </div>
+                </div>
+                <div
+                  className="shrink-0"
+                  style={{ height: EDIT_BOTTOM_SLOT_H }}
+                >
+                  {advanceOpen ? (
+                    <div className="h-full" style={editSwapFadeStyle}>
+                      <textarea
+                        value={draft.detail_extras ?? ""}
+                        aria-label="Detail extras"
+                        placeholder="Details... (Optional)"
+                        className="h-full w-full resize-none rounded border border-[rgba(200,146,42,0.3)] bg-[#fffaf2] px-2 py-1 text-xs leading-relaxed text-[rgba(28,22,16,0.72)] outline-none placeholder:text-[rgba(138,122,104,0.55)]"
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            detail_extras: e.target.value,
+                          })
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className="grid h-full grid-rows-2"
+                      style={editSwapFadeStyle}
+                    >
+                      <SteppedRewardSlider
+                        compact
+                        kind="exp"
+                        min={0}
+                        max={40}
+                        step={5}
+                        value={draft.exp}
+                        onChange={(exp) => setDraft({ ...draft, exp })}
+                      />
+                      <SteppedRewardSlider
+                        compact
+                        kind="gem"
+                        min={0}
+                        max={8}
+                        step={1}
+                        value={draft.gem}
+                        onChange={(gem) => setDraft({ ...draft, gem })}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className={railPad}>
+                  <p className="text-[11px] font-semibold uppercase tracking-[1.32px] text-[#8a7a68]">
+                    {task.task_no}
+                  </p>
+                  <PhaseLabel
+                    phase={phase}
+                    text={displayTitle}
+                    opacity={labelOpacity}
+                    className="text-sm font-semibold leading-snug text-ink"
+                  />
+                </div>
 
-            {detail ? (
-              <ExpandingBody
-                paragraphs={detail.paragraphs}
-                compactLine={
-                  compactSubtitle || detail.lead || ""
-                }
-                detailsOpen={detailsOpen}
-                useExpandedCopy={useExpandedCopy}
-                labelOpacity={labelOpacity}
-                phase={phase}
-                reserveRail={ACTION_RAIL_PR}
-              />
-            ) : compactSubtitle ? (
-              <p
-                className={`mt-0.5 truncate text-xs leading-[16.5px] text-[#8a7a68] ${ACTION_RAIL_PR}`}
-              >
-                {compactSubtitle}
-              </p>
-            ) : null}
+                {detail ? (
+                  <ExpandingBody
+                    paragraphs={detail.paragraphs}
+                    compactLine={compactSubtitle || detail.lead || ""}
+                    detailsOpen={detailsOpen}
+                    useExpandedCopy={useExpandedCopy}
+                    labelOpacity={labelOpacity}
+                    phase={phase}
+                    reserveRail={railPad}
+                  />
+                ) : compactSubtitle ? (
+                  <p
+                    className={`mt-0.5 truncate text-xs leading-[16.5px] text-[#8a7a68] ${railPad}`}
+                  >
+                    {compactSubtitle}
+                  </p>
+                ) : null}
+                {locked && unmetHints.length > 0 ? (
+                  <div className={railPad}>
+                    {unmetHints.map((hint) => (
+                      <p
+                        key={hint}
+                        className="mt-0.5 truncate text-xs leading-[16.5px] text-[#8a7a68]"
+                      >
+                        {hint}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
+        {editing && draft && advanceOpen && prereqPanelOpen ? (
+          <PrereqEditPanel
+            expanded={prereqPanelExpanded}
+            contentVisible={prereqPanelContentVisible}
+            prerequisites={draft.prerequisites}
+            onChange={updatePrereq}
+            onAdd={addPrereqSlot}
+          />
+        ) : null}
       </div>
     </article>
   );

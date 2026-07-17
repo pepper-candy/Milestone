@@ -28,7 +28,15 @@ CREATE TABLE IF NOT EXISTS tasks (
   -- Catalog order + unlock rules (synced from ref/task_exp.csv)
   seq INTEGER,
   prereq_1 TEXT,
-  prereq_2 TEXT
+  prereq_2 TEXT,
+  -- Parent-editable detail overrides (see migrate_task_detail_columns.sql)
+  icon_key TEXT,
+  detail_title TEXT,
+  detail_lead TEXT,
+  detail_aim TEXT,
+  detail_body TEXT,
+  is_catalog_template BOOLEAN NOT NULL DEFAULT true,
+  prereqs TEXT[]
 );
 
 CREATE TABLE IF NOT EXISTS user_tasks (

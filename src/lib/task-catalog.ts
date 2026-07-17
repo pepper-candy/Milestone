@@ -80,7 +80,7 @@ function looksStaleDescription(value: string | null | undefined): boolean {
   );
 }
 
-/** Prefer DB values when set; fall back to CSV catalog for prereqs/seq/display. */
+/** Prefer DB values when set; catalog only fills nulls / stale gaps. */
 export function enrichTask(task: Task): Task {
   const cat = catalogFor(task.task_no);
   if (!cat) return task;
@@ -96,8 +96,9 @@ export function enrichTask(task: Task): Task {
     description: looksStaleDescription(task.description)
       ? cat.description
       : task.description,
-    exp: cat.exp,
-    gem: cat.gem,
+    // Never overwrite parent-edited rewards with CSV.
+    exp: task.exp ?? cat.exp,
+    gem: task.gem ?? cat.gem,
     prereq_1: emptyPrereq(task.prereq_1) ? cat.prereq_1 : task.prereq_1,
     prereq_2: emptyPrereq(task.prereq_2) ? cat.prereq_2 : task.prereq_2,
   };
