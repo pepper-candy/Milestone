@@ -263,11 +263,9 @@ function emptyToNull(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
-/** Pen/trash when mentee has not finished the task yet. */
+/** Pen/trash only before the mentee has started the flow (not pending+). */
 function parentCanEditStatus(status: string | undefined): boolean {
-  // `pending` is "submitted for review" — still allow edit/remove so a bad
-  // catalog seed (old backfill used pending) is not stuck read-only.
-  return !status || status === "available" || status === "pending";
+  return !status || status === "available";
 }
 
 function CompletionRitual({
