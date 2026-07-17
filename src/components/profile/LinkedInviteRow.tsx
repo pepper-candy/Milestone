@@ -179,8 +179,8 @@ export function LinkedInviteRow({ onInviteCreated }: Props) {
         if (res.status === 503) {
           const payload =
             role === "mentee"
-              ? `Join me on Milestone as my mentee.\nInvitation code: ${normalized}\non Milestone: https://my-stone.vercel.app`
-              : `Join me on Milestone as my linked mentor.\nInvitation code: ${normalized}\non Milestone: https://my-stone.vercel.app`;
+              ? `Join me on Milestone as my mentee.\nInvitation code: ${normalized}\nhttps://my-stone.vercel.app`
+              : `Join me on Milestone as my linked mentor.\nInvitation code: ${normalized}\nhttps://my-stone.vercel.app`;
           await navigator.clipboard.writeText(payload);
           setCopied(true);
           window.setTimeout(() => setCopied(false), 2000);
@@ -201,8 +201,8 @@ export function LinkedInviteRow({ onInviteCreated }: Props) {
 
       const payload =
         role === "mentee"
-          ? `Join me on Milestone as my mentee.\nInvitation code: ${normalized}\non Milestone: https://my-stone.vercel.app`
-          : `Join me on Milestone as my mentor.\nInvitation code: ${normalized}\non Milestone: https://my-stone.vercel.app`;
+          ? `Join me on Milestone as my mentee.\nInvitation code: ${normalized}\nhttps://my-stone.vercel.app`
+          : `Join me on Milestone as my mentor.\nInvitation code: ${normalized}\nhttps://my-stone.vercel.app`;
 
       await navigator.clipboard.writeText(payload);
       setCopied(true);
