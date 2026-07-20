@@ -2032,7 +2032,7 @@ export function TaskCard({
       : requested
         ? isChild
           ? "Waiting for mentor Accept"
-          : "Mentee requested — Accept to approve"
+          : "New Task Requested"
         : pending && isChild
           ? "Pending Mentor Review"
           : verified && isChild

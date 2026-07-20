@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { hasNickname } from "@/lib/auth";
+import { resolveLinkedChildIds } from "@/lib/user-tasks";
 import type { LinkedAccount, Profile } from "@/types";
 
 async function resolveLinkedAccounts(
@@ -259,14 +260,10 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const childCodes = ((existing.linked_children as string[] | null) ?? []).filter(
-      Boolean,
+    const linkedIds = await resolveLinkedChildIds(
+      supabase,
+      existing.linked_children as string[] | null,
     );
-    const { data: childRows } = await supabase
-      .from("profiles")
-      .select("id, invitation_code")
-      .in("invitation_code", childCodes.length ? childCodes : ["__none__"]);
-    const linkedIds = (childRows ?? []).map((r) => r.id as string);
     if (!linkedIds.includes(targetId)) {
       return NextResponse.json(
         { error: "Mentee is not linked to this mentor" },
@@ -274,42 +271,71 @@ export async function PATCH(request: Request) {
       );
     }
 
-    let journeyError: { message: string } | null = null;
+    let admin;
     try {
-      const admin = createAdminClient();
-      const result = await admin
-        .from("profiles")
-        .update({ journey_start_date: ymd })
-        .eq("id", targetId);
-      journeyError = result.error;
+      admin = createAdminClient();
     } catch (err) {
-      journeyError = {
-        message: err instanceof Error ? err.message : "Admin update failed",
-      };
-    }
-
-    if (journeyError) {
+      const message =
+        err instanceof Error ? err.message : "Admin client unavailable";
       return NextResponse.json(
         {
-          error:
-            journeyError.message +
-            (/journey_start_date|column/i.test(journeyError.message)
-              ? " Run scripts/migrate_journey_start_and_requested.sql in Supabase."
-              : ""),
+          error: /SERVICE_ROLE|not configured/i.test(message)
+            ? "SUPABASE_SERVICE_ROLE_KEY is required to set mentee Day 1. Add it to .env.local / Vercel env."
+            : message,
         },
         { status: 500 },
       );
     }
 
-    if (Object.keys(updates).length === 0) {
-      const profile = existing as Profile;
-      const { linkedMentees, linkedMentors } = await loadLinkedLists(
-        supabase,
-        profile,
+    // Probe column exists (old accounts are fine; this column is new).
+    const { error: probeError } = await admin
+      .from("profiles")
+      .select("journey_start_date")
+      .eq("id", targetId)
+      .maybeSingle();
+
+    if (probeError) {
+      console.error("[profile PATCH] journey_start_date probe:", probeError);
+      return NextResponse.json(
+        {
+          error:
+            "Column journey_start_date is missing. Run scripts/migrate_journey_start_and_requested.sql in the Supabase SQL Editor, then retry.",
+        },
+        { status: 500 },
       );
+    }
+
+    const { data: saved, error: journeyError } = await admin
+      .from("profiles")
+      .update({ journey_start_date: ymd })
+      .eq("id", targetId)
+      .select("id, journey_start_date")
+      .maybeSingle();
+
+    if (journeyError) {
+      console.error("[profile PATCH] journey_start_date update:", journeyError);
+      const hint = /journey_start_date|column|schema cache/i.test(
+        journeyError.message,
+      )
+        ? " Run scripts/migrate_journey_start_and_requested.sql in Supabase SQL Editor."
+        : "";
+      return NextResponse.json(
+        { error: `${journeyError.message}${hint}` },
+        { status: 500 },
+      );
+    }
+
+    if (!saved) {
+      return NextResponse.json(
+        { error: "Mentee profile not found for journey start update" },
+        { status: 404 },
+      );
+    }
+
+    if (Object.keys(updates).length === 0) {
       return NextResponse.json({
-        ...buildProfileResponse(profile, linkedMentees, linkedMentors),
-        journey_start_date: ymd,
+        ok: true,
+        journey_start_date: saved.journey_start_date ?? ymd,
         journey_user_id: targetId,
       });
     }

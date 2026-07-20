@@ -3,6 +3,7 @@ import { hasNickname } from "@/lib/auth";
 import { getDailyQuote } from "@/lib/daily-quote";
 import { toUtcIso } from "@/lib/datetime";
 import { menteeRowsToMilestones } from "@/lib/prize-path";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { enrichTasks } from "@/lib/task-catalog";
 import {
@@ -11,6 +12,48 @@ import {
 } from "@/lib/user-tasks";
 import type { ActiveSessionState, Profile, SessionLogItem } from "@/types";
 import { redirect } from "next/navigation";
+
+/** Load mentee profile for Day N — admin bypasses RLS so mentors see the same day as mentees. */
+async function loadSubjectProfile(sessionSubjectId: string) {
+  const selectCols =
+    "nickname, invitation_code, created_at, journey_start_date";
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("profiles")
+      .select(selectCols)
+      .eq("id", sessionSubjectId)
+      .maybeSingle();
+    if (!error && data) return data;
+    if (error && /journey_start_date|column/i.test(error.message)) {
+      const { data: fallback } = await admin
+        .from("profiles")
+        .select("nickname, invitation_code, created_at")
+        .eq("id", sessionSubjectId)
+        .maybeSingle();
+      return fallback;
+    }
+  } catch {
+    // No service role — fall through to user client.
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select(selectCols)
+    .eq("id", sessionSubjectId)
+    .maybeSingle();
+  if (!error && data) return data;
+  if (error && /journey_start_date|column/i.test(error.message)) {
+    const { data: fallback } = await supabase
+      .from("profiles")
+      .select("nickname, invitation_code, created_at")
+      .eq("id", sessionSubjectId)
+      .maybeSingle();
+    return fallback;
+  }
+  return null;
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -79,7 +122,7 @@ export default async function DashboardPage() {
     { data: menteeMilestoneRows, error: milestonesError },
     { data: openSession },
     { data: endedSessions },
-    { data: subjectProfile },
+    subjectProfile,
   ] = await Promise.all([
     supabase.from("tasks").select("*").order("seq"),
     fetchViewerUserTasks(supabase, subjectIds),
@@ -93,12 +136,8 @@ export default async function DashboardPage() {
     openSessionQuery,
     sessionsQuery,
     sessionSubjectId
-      ? supabase
-          .from("profiles")
-          .select("nickname, invitation_code, created_at, journey_start_date")
-          .eq("id", sessionSubjectId)
-          .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+      ? loadSubjectProfile(sessionSubjectId)
+      : Promise.resolve(null),
   ]);
 
   const milestones = menteeRowsToMilestones(menteeMilestoneRows ?? []);
