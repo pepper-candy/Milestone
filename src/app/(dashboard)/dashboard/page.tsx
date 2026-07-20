@@ -13,8 +13,17 @@ import {
 import type { ActiveSessionState, Profile, SessionLogItem } from "@/types";
 import { redirect } from "next/navigation";
 
+type SubjectProfileRow = {
+  nickname: string | null;
+  invitation_code: string | null;
+  created_at: string | null;
+  journey_start_date?: string | null;
+};
+
 /** Load mentee profile for Day N — admin bypasses RLS so mentors see the same day as mentees. */
-async function loadSubjectProfile(sessionSubjectId: string) {
+async function loadSubjectProfile(
+  sessionSubjectId: string,
+): Promise<SubjectProfileRow | null> {
   const selectCols =
     "nickname, invitation_code, created_at, journey_start_date";
   try {
@@ -24,14 +33,14 @@ async function loadSubjectProfile(sessionSubjectId: string) {
       .select(selectCols)
       .eq("id", sessionSubjectId)
       .maybeSingle();
-    if (!error && data) return data;
+    if (!error && data) return data as SubjectProfileRow;
     if (error && /journey_start_date|column/i.test(error.message)) {
       const { data: fallback } = await admin
         .from("profiles")
         .select("nickname, invitation_code, created_at")
         .eq("id", sessionSubjectId)
         .maybeSingle();
-      return fallback;
+      return (fallback as SubjectProfileRow | null) ?? null;
     }
   } catch {
     // No service role — fall through to user client.
@@ -43,14 +52,14 @@ async function loadSubjectProfile(sessionSubjectId: string) {
     .select(selectCols)
     .eq("id", sessionSubjectId)
     .maybeSingle();
-  if (!error && data) return data;
+  if (!error && data) return data as SubjectProfileRow;
   if (error && /journey_start_date|column/i.test(error.message)) {
     const { data: fallback } = await supabase
       .from("profiles")
       .select("nickname, invitation_code, created_at")
       .eq("id", sessionSubjectId)
       .maybeSingle();
-    return fallback;
+    return (fallback as SubjectProfileRow | null) ?? null;
   }
   return null;
 }
@@ -194,9 +203,9 @@ export default async function DashboardPage() {
     (subjectProfile?.created_at as string | null | undefined) ??
     (typedProfile.is_child ? typedProfile.created_at : null);
   const journeyStartDate =
-    (subjectProfile?.journey_start_date as string | null | undefined) ??
+    subjectProfile?.journey_start_date ??
     (typedProfile.is_child
-      ? ((typedProfile.journey_start_date as string | null | undefined) ?? null)
+      ? (typedProfile.journey_start_date ?? null)
       : null);
 
   return (
