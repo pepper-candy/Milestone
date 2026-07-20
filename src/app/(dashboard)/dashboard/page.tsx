@@ -95,7 +95,7 @@ export default async function DashboardPage() {
     sessionSubjectId
       ? supabase
           .from("profiles")
-          .select("nickname, invitation_code")
+          .select("nickname, invitation_code, created_at, journey_start_date")
           .eq("id", sessionSubjectId)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
@@ -151,6 +151,15 @@ export default async function DashboardPage() {
       ? ((subjectProfile?.invitation_code as string | null) ?? null)
       : null;
 
+  const subjectCreatedAt =
+    (subjectProfile?.created_at as string | null | undefined) ??
+    (typedProfile.is_child ? typedProfile.created_at : null);
+  const journeyStartDate =
+    (subjectProfile?.journey_start_date as string | null | undefined) ??
+    (typedProfile.is_child
+      ? ((typedProfile.journey_start_date as string | null | undefined) ?? null)
+      : null);
+
   return (
     <DashboardClient
       profile={typedProfile}
@@ -163,6 +172,8 @@ export default async function DashboardPage() {
       subjectIds={subjectIds}
       subjectNickname={subjectNickname}
       subjectInviteCode={subjectInviteCode}
+      subjectCreatedAt={subjectCreatedAt}
+      journeyStartDate={journeyStartDate}
       tasksWarning={tasksWarning}
       dailyQuote={dailyQuote}
     />

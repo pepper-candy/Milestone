@@ -3,7 +3,9 @@ export type UserTaskStatus =
   | "pending"
   | "verified"
   | "claimed"
-  | "removed";
+  | "removed"
+  /** Mentee-suggested task awaiting parent Accept. */
+  | "requested";
 
 /** Glyph keys parents can pick; null = infer from category / task_no. */
 export type TaskIconKey =
@@ -26,6 +28,8 @@ export interface Profile {
   converted_exp?: number;
   /** Mentor default prize path stops (JSON); copied to new mentees. */
   prize_path_default?: unknown;
+  /** HKT calendar date (YYYY-MM-DD) for Day 1; null → use created_at. */
+  journey_start_date?: string | null;
   created_at: string;
 }
 

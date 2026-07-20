@@ -45,27 +45,11 @@ export const EnvironmentCheckPanel = forwardRef<
   useImperativeHandle(ref, () => ({
     async confirm() {
       setError(null);
-      let latitude = coords?.latitude;
-      let longitude = coords?.longitude;
-
-      if (requireEvidence) {
-        // Workspace photo is optional (beta); GPS is still required.
-        if (latitude == null || longitude == null) {
-          try {
-            const c = await capture();
-            latitude = c.latitude;
-            longitude = c.longitude;
-          } catch {
-            setError("Get your location before continuing.");
-            throw new Error("location");
-          }
-        }
-      }
-
+      // Photo + GPS are optional; never auto-capture location.
       return {
         photo_url: photoUrl ?? undefined,
-        latitude,
-        longitude,
+        latitude: coords?.latitude,
+        longitude: coords?.longitude,
       };
     },
     reset() {
@@ -138,7 +122,7 @@ export const EnvironmentCheckPanel = forwardRef<
               <>
                 <MapPinIcon size={32} className="text-[#4a8bb8]" />
                 <span className="px-2 text-center text-xs font-semibold tracking-[0.3px] text-[rgba(28,22,16,0.6)]">
-                  {geoLoading ? "Locating…" : "Get location"}
+                  {geoLoading ? "Locating…" : "Location (optional)"}
                 </span>
               </>
             )}

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { hasNickname } from "@/lib/auth";
 import type { LinkedAccount, Profile } from "@/types";
@@ -181,6 +182,9 @@ export async function PATCH(request: Request) {
     nickname?: string;
     avatar_url?: string | null;
     selected_child_code?: string | null;
+    /** YYYY-MM-DD — set Day 1 for a mentee (mentor only). */
+    journey_start_date?: string;
+    journey_user_id?: string;
   };
 
   const { data: existing, error: loadError } = await supabase
@@ -229,6 +233,86 @@ export async function PATCH(request: Request) {
     }
 
     updates.selected_child_code = code;
+  }
+
+  if (body.journey_start_date !== undefined) {
+    if (existing.is_child) {
+      return NextResponse.json(
+        { error: "Only mentors can set journey start date" },
+        { status: 403 },
+      );
+    }
+
+    const ymd = body.journey_start_date.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+      return NextResponse.json(
+        { error: "journey_start_date must be YYYY-MM-DD" },
+        { status: 400 },
+      );
+    }
+
+    const targetId = body.journey_user_id?.trim() || null;
+    if (!targetId) {
+      return NextResponse.json(
+        { error: "journey_user_id required" },
+        { status: 400 },
+      );
+    }
+
+    const childCodes = ((existing.linked_children as string[] | null) ?? []).filter(
+      Boolean,
+    );
+    const { data: childRows } = await supabase
+      .from("profiles")
+      .select("id, invitation_code")
+      .in("invitation_code", childCodes.length ? childCodes : ["__none__"]);
+    const linkedIds = (childRows ?? []).map((r) => r.id as string);
+    if (!linkedIds.includes(targetId)) {
+      return NextResponse.json(
+        { error: "Mentee is not linked to this mentor" },
+        { status: 403 },
+      );
+    }
+
+    let journeyError: { message: string } | null = null;
+    try {
+      const admin = createAdminClient();
+      const result = await admin
+        .from("profiles")
+        .update({ journey_start_date: ymd })
+        .eq("id", targetId);
+      journeyError = result.error;
+    } catch (err) {
+      journeyError = {
+        message: err instanceof Error ? err.message : "Admin update failed",
+      };
+    }
+
+    if (journeyError) {
+      return NextResponse.json(
+        {
+          error:
+            journeyError.message +
+            (/journey_start_date|column/i.test(journeyError.message)
+              ? " Run scripts/migrate_journey_start_and_requested.sql in Supabase."
+              : ""),
+        },
+        { status: 500 },
+      );
+    }
+
+    if (Object.keys(updates).length === 0) {
+      const profile = existing as Profile;
+      const { linkedMentees, linkedMentors } = await loadLinkedLists(
+        supabase,
+        profile,
+      );
+      return NextResponse.json({
+        ...buildProfileResponse(profile, linkedMentees, linkedMentors),
+        journey_start_date: ymd,
+        journey_user_id: targetId,
+      });
+    }
   }
 
   if (Object.keys(updates).length === 0) {

@@ -1,8 +1,12 @@
 "use client";
 
 import { GemIcon } from "@/components/ui/Icons";
-import { getCampaignDay } from "@/lib/datetime";
+import {
+  getJourneyDay,
+  toHKLogicalDateString,
+} from "@/lib/datetime";
 import type { Milestone } from "@/types";
+import { useRef, useState } from "react";
 
 type MilestonePathProps = {
   milestones: Milestone[];
@@ -10,6 +14,13 @@ type MilestonePathProps = {
   compact?: boolean;
   /** When set, compact card opens the prize path editor. */
   onOpenEditor?: () => void;
+  /** Journey Day 1 date (YYYY-MM-DD) or null → use createdAt. */
+  journeyStartDate?: string | null;
+  /** Mentee profile created_at (join fallback for Day 1). */
+  subjectCreatedAt?: string | null;
+  /** Parent may pick a new Day 1 via calendar. */
+  canEditJourneyStart?: boolean;
+  onJourneyStartChange?: (ymd: string) => void | Promise<void>;
 };
 
 export function MilestonePath({
@@ -17,6 +28,10 @@ export function MilestonePath({
   currentGems,
   compact = false,
   onOpenEditor,
+  journeyStartDate = null,
+  subjectCreatedAt = null,
+  canEditJourneyStart = false,
+  onJourneyStartChange,
 }: MilestonePathProps) {
   const sorted = [...milestones].sort(
     (a, b) => a.gem_threshold - b.gem_threshold,
@@ -44,10 +59,62 @@ export function MilestonePath({
       ? "No prizes yet"
       : "All milestones unlocked";
 
-  const campaignDay = getCampaignDay();
+  const journeyDay = getJourneyDay(journeyStartDate, subjectCreatedAt);
+  const dateInputRef = useRef<HTMLInputElement>(null);
+  const [savingDay, setSavingDay] = useState(false);
+  const dateValue =
+    journeyStartDate?.trim() ||
+    (subjectCreatedAt ? toHKLogicalDateString(subjectCreatedAt) : toHKLogicalDateString());
+
+  async function handleDatePicked(ymd: string) {
+    if (!ymd || !onJourneyStartChange) return;
+    setSavingDay(true);
+    try {
+      await onJourneyStartChange(ymd);
+    } finally {
+      setSavingDay(false);
+    }
+  }
+
+  const dayControl =
+    canEditJourneyStart && onJourneyStartChange ? (
+      <>
+        <button
+          type="button"
+          disabled={savingDay}
+          onClick={(e) => {
+            e.stopPropagation();
+            dateInputRef.current?.showPicker?.();
+            dateInputRef.current?.click();
+          }}
+          aria-label="Set journey start date"
+          className="shrink-0 text-xs font-semibold tabular-nums text-ink underline decoration-[rgba(28,22,16,0.25)] underline-offset-2 transition active:opacity-70 disabled:opacity-50"
+        >
+          Day {journeyDay}
+        </button>
+        <input
+          ref={dateInputRef}
+          type="date"
+          value={dateValue}
+          className="sr-only"
+          tabIndex={-1}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v) void handleDatePicked(v);
+          }}
+        />
+      </>
+    ) : (
+      <p className="shrink-0 text-xs font-semibold tabular-nums text-ink">
+        Day {journeyDay}
+      </p>
+    );
 
   if (compact) {
-    const body = (
+    const shellClass =
+      "rounded-2xl border border-[rgba(200,146,42,0.15)] bg-[rgba(223,238,243,0.45)] px-4 py-3 text-left";
+
+    const progressBlock = (
       <>
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="min-w-0 truncate text-[11px] font-semibold tracking-[1.32px] text-[#8a7a68]">
@@ -68,36 +135,33 @@ export function MilestonePath({
             }}
           />
         </div>
-        {afterNext ? (
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <p className="min-w-0 truncate text-[11px] text-[#8a7a68]">
-              Next: {afterNext.prize_name || afterNext.title}
-            </p>
-            <p className="shrink-0 text-xs font-semibold tabular-nums text-ink">
-              Day {campaignDay}
-            </p>
-          </div>
-        ) : null}
       </>
     );
 
-    const shellClass =
-      "rounded-2xl border border-[rgba(200,146,42,0.15)] bg-[rgba(223,238,243,0.45)] px-4 py-3 text-left";
-
-    if (onOpenEditor) {
-      return (
-        <button
-          type="button"
-          onClick={onOpenEditor}
-          aria-label="Open prize path"
-          className={`${shellClass} w-full transition active:brightness-95`}
-        >
-          {body}
-        </button>
-      );
-    }
-
-    return <div className={shellClass}>{body}</div>;
+    return (
+      <div className={shellClass}>
+        {onOpenEditor ? (
+          <button
+            type="button"
+            onClick={onOpenEditor}
+            aria-label="Open prize path"
+            className="w-full text-left transition active:brightness-95"
+          >
+            {progressBlock}
+          </button>
+        ) : (
+          progressBlock
+        )}
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="min-w-0 truncate text-[11px] text-[#8a7a68]">
+            {afterNext
+              ? `Next: ${afterNext.prize_name || afterNext.title}`
+              : "\u00a0"}
+          </p>
+          {dayControl}
+        </div>
+      </div>
+    );
   }
 
   return (

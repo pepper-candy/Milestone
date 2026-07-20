@@ -909,13 +909,13 @@ export function TaskList({
     </FadeInOnMount>
   ) : null;
 
-  const addTaskBlock = !isChild ? (
+  const addTaskBlock = (
     <AddNewTaskBlock
       busy={busyId === "__new__"}
       onCreate={(patch) => handleCreate(patch)}
       onActiveChange={setAddComposerActive}
     />
-  ) : null;
+  );
 
   if (tasks.length === 0 && userTasks.length === 0) {
     return (

@@ -37,6 +37,7 @@ import {
 export type TaskCardAction =
   | "complete"
   | "approve"
+  | "accept"
   | "claim"
   | "dismiss"
   | "undo";
@@ -1224,23 +1225,27 @@ function ActionButton({
   const label =
     action === "claim"
       ? "CLAIM"
-      : action === "approve"
-        ? "PASS"
-        : action === "dismiss" || action === "undo"
-          ? "UNDO"
-          : "CHECK";
+      : action === "accept"
+        ? "ACCEPT"
+        : action === "approve"
+          ? "PASS"
+          : action === "dismiss" || action === "undo"
+            ? "UNDO"
+            : "CHECK";
   const ariaLabel =
     action === "claim"
       ? "Claim reward"
-      : action === "approve"
-        ? "Pass task"
-        : action === "dismiss"
-          ? "Dismiss pending task"
-          : action === "undo"
-            ? "Undo passed or finished task"
-          : action === "complete"
-            ? "Mark complete"
-            : "Task status";
+      : action === "accept"
+        ? "Accept requested task"
+        : action === "approve"
+          ? "Pass task"
+          : action === "dismiss"
+            ? "Cancel request or dismiss pending task"
+            : action === "undo"
+              ? "Undo passed or finished task"
+              : action === "complete"
+                ? "Mark complete"
+                : "Task status";
 
   const isUndo = showDismiss || action === "undo";
   const useSwipeGradient = !isUndo;
@@ -1290,16 +1295,20 @@ function resolveAction(
   const claimed = status === "claimed";
   const verified = status === "verified";
   const pending = status === "pending";
+  const requested = status === "requested";
   const available = !status || status === "available";
   let action: TaskCardAction | null = null;
   let doneLook = claimed;
 
   if (!locked) {
     if (isChild) {
-      if (available) action = "complete";
+      if (requested) action = "dismiss";
+      else if (available) action = "complete";
       else if (pending) action = "dismiss";
       else if (verified) action = "claim";
       else if (claimed) doneLook = true;
+    } else if (requested) {
+      action = "accept";
     } else if (pending) {
       action = "approve";
     } else if (verified || claimed) {
@@ -2004,6 +2013,7 @@ export function TaskCard({
   const claimed = status === "claimed";
   const pending = status === "pending";
   const verified = status === "verified";
+  const requested = status === "requested";
   const unmetHints = (lockHints ?? []).filter(Boolean);
   const canParentEdit =
     !isChild &&
@@ -2019,15 +2029,19 @@ export function TaskCard({
   const compactSubtitle =
     locked && !editing
       ? null
-      : pending && isChild
-        ? "Pending Mentor Review"
-        : verified && isChild
-          ? "Claim to Complete"
-          : verified && !isChild
-            ? "Marked as Passed"
-            : (editing && draft
-                ? draft.description
-                : task.description) || null;
+      : requested
+        ? isChild
+          ? "Waiting for mentor Accept"
+          : "Mentee requested — Accept to approve"
+        : pending && isChild
+          ? "Pending Mentor Review"
+          : verified && isChild
+            ? "Claim to Complete"
+            : verified && !isChild
+              ? "Marked as Passed"
+              : (editing && draft
+                  ? draft.description
+                  : task.description) || null;
   const showDeleteChrome = deleteRitual || deleteClosing;
   const showAction = !locked && !editing && !showDeleteChrome && Boolean(action || doneLook);
   const parentLockedView = locked && !isChild;

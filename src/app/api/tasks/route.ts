@@ -267,6 +267,7 @@ export async function POST(request: Request) {
     action:
       | "complete"
       | "approve"
+      | "accept"
       | "claim"
       | "dismiss"
       | "undo"
@@ -317,6 +318,20 @@ export async function POST(request: Request) {
     }
     if (!body.task_id) {
       return NextResponse.json({ error: "task_id required" }, { status: 400 });
+    }
+
+    const { data: prior } = await supabase
+      .from("user_tasks")
+      .select("status")
+      .eq("user_id", user.id)
+      .eq("task_id", body.task_id)
+      .maybeSingle();
+
+    if (prior?.status === "requested") {
+      return NextResponse.json(
+        { error: "Wait for your mentor to Accept this task first" },
+        { status: 400 },
+      );
     }
 
     const { data, error } = await supabase
@@ -414,13 +429,46 @@ export async function POST(request: Request) {
   if (body.action === "dismiss") {
     if (!isChild) {
       return NextResponse.json(
-        { error: "Only children can dismiss pending tasks" },
+        { error: "Only children can dismiss pending or requested tasks" },
         { status: 403 },
       );
     }
     if (!body.user_task_id) {
       return NextResponse.json({ error: "user_task_id required" }, { status: 400 });
     }
+
+    const { data: existing, error: existingError } = await supabase
+      .from("user_tasks")
+      .select("id, status, task_id")
+      .eq("id", body.user_task_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existingError || !existing) {
+      return NextResponse.json(
+        { error: existingError?.message || "Task not found" },
+        { status: existingError ? 500 : 404 },
+      );
+    }
+
+    // Cancel mentee add-task request (remove assignment).
+    if (existing.status === "requested") {
+      const { client: writeClient } = tasksWriteClient(supabase);
+      const { error: removeError } = await writeClient
+        .from("user_tasks")
+        .update({ status: "removed" })
+        .eq("id", body.user_task_id)
+        .eq("user_id", user.id)
+        .eq("status", "requested");
+      if (removeError) {
+        return NextResponse.json(
+          { error: removeError.message },
+          { status: 500 },
+        );
+      }
+      return NextResponse.json({ userTask: { ...existing, status: "removed" } });
+    }
+
     const { data, error } = await supabase
       .from("user_tasks")
       .update({ status: "available", completed_at: null })
@@ -429,6 +477,63 @@ export async function POST(request: Request) {
       .eq("status", "pending")
       .select("*")
       .single();
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ userTask: data });
+  }
+
+  if (body.action === "accept") {
+    if (isChild) {
+      return NextResponse.json(
+        { error: "Only parents can accept requested tasks" },
+        { status: 403 },
+      );
+    }
+    if (!body.user_task_id) {
+      return NextResponse.json({ error: "user_task_id required" }, { status: 400 });
+    }
+
+    const linkedChildIds = await resolveLinkedChildIds(
+      supabase,
+      profile?.linked_children,
+    );
+
+    const { data: existing, error: existingError } = await supabase
+      .from("user_tasks")
+      .select("id, user_id, status")
+      .eq("id", body.user_task_id)
+      .maybeSingle();
+
+    if (existingError || !existing) {
+      return NextResponse.json(
+        { error: existingError?.message || "Task not found" },
+        { status: existingError ? 500 : 404 },
+      );
+    }
+
+    if (!linkedChildIds.includes(existing.user_id as string)) {
+      return NextResponse.json(
+        { error: "Task does not belong to a linked child" },
+        { status: 403 },
+      );
+    }
+
+    if (existing.status !== "requested") {
+      return NextResponse.json(
+        { error: "Only requested tasks can be accepted" },
+        { status: 400 },
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("user_tasks")
+      .update({ status: "available" })
+      .eq("id", body.user_task_id)
+      .eq("status", "requested")
+      .select("*")
+      .single();
+
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
@@ -496,7 +601,6 @@ export async function POST(request: Request) {
   }
 
   if (
-    body.action === "create" ||
     body.action === "update" ||
     body.action === "delete" ||
     body.action === "remove" ||
@@ -642,23 +746,28 @@ export async function POST(request: Request) {
   }
 
   if (body.action === "create" && body.task) {
-    const childUserId = body.child_user_id;
-    if (!childUserId) {
-      return NextResponse.json(
-        { error: "child_user_id required" },
-        { status: 400 },
-      );
-    }
+    let childUserId = body.child_user_id;
+    const assignStatus = isChild ? "requested" : "available";
 
-    const linkedChildIds = await resolveLinkedChildIds(
-      supabase,
-      profile?.linked_children,
-    );
-    if (!linkedChildIds.includes(childUserId)) {
-      return NextResponse.json(
-        { error: "Task does not belong to a linked child" },
-        { status: 403 },
+    if (isChild) {
+      childUserId = user.id;
+    } else {
+      if (!childUserId) {
+        return NextResponse.json(
+          { error: "child_user_id required" },
+          { status: 400 },
+        );
+      }
+      const linkedChildIds = await resolveLinkedChildIds(
+        supabase,
+        profile?.linked_children,
       );
+      if (!linkedChildIds.includes(childUserId)) {
+        return NextResponse.json(
+          { error: "Task does not belong to a linked child" },
+          { status: 403 },
+        );
+      }
     }
 
     const patch = body.task;
@@ -678,9 +787,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: catalogError.message }, { status: 500 });
     }
 
-    let seedCatalog = patch.seed_catalog;
-    if (seedCatalog === undefined) {
-      seedCatalog = !catalogTemplate;
+    // Only mentors seed shared catalog from create; mentee requests stay personal.
+    let seedCatalog = false;
+    if (!isChild) {
+      seedCatalog =
+        patch.seed_catalog === undefined ? !catalogTemplate : patch.seed_catalog;
     }
 
     const { client: writeClient, viaAdmin } = tasksWriteClient(supabase);
@@ -728,7 +839,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Optionally seed a separate shared catalog template for others to load.
     if (seedCatalog && !catalogTemplate) {
       const { error: seedError } = await writeClient.from("tasks").insert({
         ...sharedFields,
@@ -746,13 +856,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // Assign to mentee (admin client bypasses user_tasks RLS that only allows self-insert).
     const { data: userTask, error: assignError } = await writeClient
       .from("user_tasks")
       .insert({
         user_id: childUserId,
         task_id: created.id,
-        status: "available",
+        status: assignStatus,
       })
       .select("*")
       .single();
@@ -763,9 +872,14 @@ export async function POST(request: Request) {
         /permission denied|42501/i.test(assignError.message) && !viaAdmin
           ? " Run supabase/fix_parent_create_task.sql so parents can assign tasks, and/or set SUPABASE_SERVICE_ROLE_KEY."
           : permissionDeniedHint(assignError.message, viaAdmin);
+      const statusHint = /requested|check constraint|status/i.test(
+        assignError.message,
+      )
+        ? " Run scripts/migrate_journey_start_and_requested.sql so status 'requested' is allowed."
+        : "";
       return NextResponse.json(
         {
-          error: `${assignError.message}${parentHint}`,
+          error: `${assignError.message}${parentHint}${statusHint}`,
         },
         { status: 500 },
       );

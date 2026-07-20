@@ -24,6 +24,7 @@ export function parseUtcMs(value: string | Date): number {
 }
 
 const HK_TIMEZONE = "Asia/Hong_Kong";
+/** @deprecated Global campaign fallback; prefer getJourneyDay with mentee start. */
 const CAMPAIGN_DAY1 = { year: 2026, month: 7, day: 18 };
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -48,16 +49,14 @@ function getHKDateParts(date: Date) {
   };
 }
 
-/** Campaign day with 4:00 AM HKT rollover; July 18, 2026 is Day 1. */
-export function getCampaignDay(now: Date = new Date()): number {
-  const logicalMs = getHKLogicalDayStartMs(now);
-  const day1Ms = Date.UTC(
-    CAMPAIGN_DAY1.year,
-    CAMPAIGN_DAY1.month - 1,
-    CAMPAIGN_DAY1.day,
-  );
-
-  return Math.floor((logicalMs - day1Ms) / MS_PER_DAY) + 1;
+/** Logical calendar day start (UTC midnight of Y-M-D) with 4:00 AM HKT rollover. */
+export function getHKLogicalDayStartMs(now: Date = new Date()): number {
+  const { year, month, day, hour } = getHKDateParts(now);
+  const logical = new Date(Date.UTC(year, month - 1, day));
+  if (hour < 4) {
+    logical.setUTCDate(logical.getUTCDate() - 1);
+  }
+  return logical.getTime();
 }
 
 /**
@@ -68,13 +67,69 @@ export function getHKLogicalDayNumber(now: Date = new Date()): number {
   return Math.floor(getHKLogicalDayStartMs(now) / MS_PER_DAY);
 }
 
-function getHKLogicalDayStartMs(now: Date): number {
-  const { year, month, day, hour } = getHKDateParts(now);
-  const logical = new Date(Date.UTC(year, month - 1, day));
-  if (hour < 4) {
-    logical.setUTCDate(logical.getUTCDate() - 1);
+/** YYYY-MM-DD for a Date/ISO using HKT logical day (4am boundary). */
+export function toHKLogicalDateString(value: string | Date = new Date()): string {
+  const date = value instanceof Date ? value : new Date(toUtcIso(value));
+  if (Number.isNaN(date.getTime())) {
+    return toHKLogicalDateString(new Date());
   }
-  return logical.getTime();
+  const ms = getHKLogicalDayStartMs(date);
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Parse YYYY-MM-DD as that HKT logical day's UTC midnight key. */
+export function parseHKLogicalDateString(ymd: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!year || !month || !day) return null;
+  return Date.UTC(year, month - 1, day);
+}
+
+/**
+ * Day N for a mentee (4:00 AM Asia/Hong_Kong rollover).
+ * - Mentor-set `journey_start_date`: that calendar day is Day 1.
+ * - Else account `created_at`: that calendar day is Day 0 (next logical day = Day 1).
+ */
+export function getJourneyDay(
+  journeyStartDate: string | null | undefined,
+  createdAt: string | null | undefined,
+  now: Date = new Date(),
+): number {
+  const logicalMs = getHKLogicalDayStartMs(now);
+  const explicitStart = journeyStartDate
+    ? parseHKLogicalDateString(journeyStartDate)
+    : null;
+
+  if (explicitStart != null) {
+    return Math.max(
+      1,
+      Math.floor((logicalMs - explicitStart) / MS_PER_DAY) + 1,
+    );
+  }
+
+  const joinStart = createdAt
+    ? getHKLogicalDayStartMs(new Date(toUtcIso(createdAt)))
+    : getHKLogicalDayStartMs(now);
+
+  return Math.max(0, Math.floor((logicalMs - joinStart) / MS_PER_DAY));
+}
+
+/** @deprecated Prefer getJourneyDay — kept for any leftover callers. */
+export function getCampaignDay(now: Date = new Date()): number {
+  const logicalMs = getHKLogicalDayStartMs(now);
+  const day1Ms = Date.UTC(
+    CAMPAIGN_DAY1.year,
+    CAMPAIGN_DAY1.month - 1,
+    CAMPAIGN_DAY1.day,
+  );
+  return Math.floor((logicalMs - day1Ms) / MS_PER_DAY) + 1;
 }
 
 /** e.g. "14 July, 2026" in Asia/Hong_Kong. */

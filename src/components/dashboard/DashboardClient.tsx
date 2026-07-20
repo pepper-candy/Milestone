@@ -38,6 +38,10 @@ type Props = {
   subjectNickname?: string | null;
   /** Selected mentee invite code — title fallback before nickname is set. */
   subjectInviteCode?: string | null;
+  /** Mentee join time — Day 1 fallback when journey_start_date is unset. */
+  subjectCreatedAt?: string | null;
+  /** Explicit Day 1 (YYYY-MM-DD, HKT logical). */
+  journeyStartDate?: string | null;
   dailyQuote: DailyQuote;
 };
 
@@ -60,11 +64,17 @@ export function DashboardClient({
   subjectIds = [],
   subjectNickname = null,
   subjectInviteCode = null,
+  subjectCreatedAt = null,
+  journeyStartDate: initialJourneyStart = null,
   dailyQuote,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const [openingProfile, setOpeningProfile] = useState(false);
+  const [journeyStartDate, setJourneyStartDate] = useState(initialJourneyStart);
+  useEffect(() => {
+    setJourneyStartDate(initialJourneyStart);
+  }, [initialJourneyStart]);
   const [active, setActive] = useState(initialActive);
   const [tasks, setTasks] = useState(initialTasks);
   const [userTasks, setUserTasks] = useState(initialUserTasks);
@@ -443,6 +453,27 @@ export function DashboardClient({
               currentGems={gems}
               compact
               onOpenEditor={() => setPrizeEditorOpen(true)}
+              journeyStartDate={journeyStartDate}
+              subjectCreatedAt={subjectCreatedAt}
+              canEditJourneyStart={!profile.is_child && Boolean(subjectIds[0])}
+              onJourneyStartChange={async (ymd) => {
+                const menteeId = subjectIds[0];
+                if (!menteeId) return;
+                const res = await fetch("/api/profile", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    journey_start_date: ymd,
+                    journey_user_id: menteeId,
+                  }),
+                });
+                if (!res.ok) {
+                  const data = (await res.json()) as { error?: string };
+                  alert(data.error || "Could not update start date");
+                  return;
+                }
+                setJourneyStartDate(ymd);
+              }}
             />
             <button
               type="button"

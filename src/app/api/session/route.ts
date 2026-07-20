@@ -212,15 +212,6 @@ export async function POST(request: Request) {
     // Start
     // ----------------------------------------------------------
     if (body.action === "start") {
-      if (!isTutorial) {
-        if (body.latitude == null || body.longitude == null) {
-          return NextResponse.json(
-            { error: "GPS is required to start" },
-            { status: 400 },
-          );
-        }
-      }
-
       if (!subjectId) {
         return NextResponse.json(
           { error: "Link a child before starting a tutorial session" },
@@ -334,14 +325,6 @@ export async function POST(request: Request) {
       }
 
       const isTutorialSession = Boolean(open.is_tutorial);
-      if (!isTutorialSession) {
-        if (body.latitude == null || body.longitude == null) {
-          return NextResponse.json(
-            { error: "GPS is required to end" },
-            { status: 400 },
-          );
-        }
-      }
 
       const endedAt = new Date();
       const durationSeconds = Math.max(
